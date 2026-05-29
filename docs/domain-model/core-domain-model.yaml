@@ -1,0 +1,436 @@
+# Core Domain Model — Mini Payment Gateway
+# MPG-001 · Version 1.0 · MVP Scope
+
+---
+meta:
+  id: mpg-001
+  version: 1.0
+  scope: mvp
+  canonical_terms:
+    payment: "Core business record for one merchant charge request and its lifecycle outcome"
+    refund: "Reversal of value against one successful Payment"
+    refunded_payment: "Payment whose original amount has been fully reversed"
+    notification_delivery_record: "Delivery tracking record for one domain event to one destination"
+    reconciliation: "Record of one balance comparison run"
+    audit_record: "Append-only historical fact about a performed action"
+
+entities:
+  payment:
+    description: "Primary aggregate for the charge lifecycle"
+    attributes:
+      payment_id:
+        type: uuid
+        required: true
+        description: "Unique identifier"
+      merchant_id:
+        type: uuid
+        required: true
+        description: "Owner of this payment"
+      amount_minor:
+        type: integer
+        required: true
+        description: "Amount in minor units (e.g., cents)"
+      currency:
+        type: string
+        required: true
+        pattern: "^[A-Z]{3}$"
+        description: "ISO 4217 currency code"
+      status:
+        type: PaymentStatus
+        required: true
+        description: "Current lifecycle position"
+      failure_reason:
+        type: string
+        required: false
+        description: "Reason for failure if status is failed"
+      idempotency_key:
+        type: string
+        required: false
+        description: "Client-supplied key for idempotent creation"
+      created_at:
+        type: timestamp
+        required: true
+        description: "Creation timestamp"
+      updated_at:
+        type: timestamp
+        required: true
+        description: "Last modification timestamp"
+    statuses:
+      - pending
+      - processing
+      - successful
+      - failed
+      - refunded
+    terminal_statuses:
+      - failed
+      - refunded
+
+  refund:
+    description: "Full reversal of value against one successful Payment (MVP: one per payment)"
+    attributes:
+      refund_id:
+        type: uuid
+        required: true
+        description: "Unique identifier"
+      payment_id:
+        type: uuid
+        required: true
+        description: "The payment being refunded"
+      amount_minor:
+        type: integer
+        required: true
+        description: "Amount in minor units (equals original payment amount)"
+      currency:
+        type: string
+        required: true
+        pattern: "^[A-Z]{3}$"
+        description: "ISO 4217 currency code (matches payment)"
+      status:
+        type: RefundStatus
+        required: true
+        description: "Current lifecycle position"
+      failure_reason:
+        type: string
+        required: false
+        description: "Reason for failure if status is failed"
+      idempotency_key:
+        type: string
+        required: false
+        description: "Client-supplied key for idempotent creation"
+      created_at:
+        type: timestamp
+        required: true
+        description: "Creation timestamp"
+      updated_at:
+        type: timestamp
+        required: true
+        description: "Last modification timestamp"
+    statuses:
+      - pending
+      - processing
+      - completed
+      - failed
+    terminal_statuses:
+      - completed
+      - failed
+
+  notification_delivery_record:
+    description: "Tracks delivery of one domain event to one destination"
+    attributes:
+      record_id:
+        type: uuid
+        required: true
+        description: "Unique identifier"
+      event_id:
+        type: uuid
+        required: true
+        description: "The domain event this record corresponds to"
+      destination:
+        type: string
+        required: true
+        description: "Target delivery endpoint or address"
+      event_type:
+        type: string
+        required: true
+        description: "Type of domain event being delivered"
+      status:
+        type: NotificationStatus
+        required: true
+        description: "Current delivery status"
+      retry_count:
+        type: integer
+        required: true
+        default: 0
+        description: "Number of delivery attempts so far"
+      last_error:
+        type: string
+        required: false
+        description: "Error message from last failed attempt"
+      last_attempt_at:
+        type: timestamp
+        required: false
+        description: "Timestamp of the most recent delivery attempt"
+      next_retry_at:
+        type: timestamp
+        required: false
+        description: "When the next retry is scheduled"
+      created_at:
+        type: timestamp
+        required: true
+        description: "Creation timestamp"
+      updated_at:
+        type: timestamp
+        required: true
+        description: "Last modification timestamp"
+    statuses:
+      - pending
+      - delivered
+      - failed
+
+  reconciliation:
+    description: "Record of one balance comparison run"
+    attributes:
+      reconciliation_id:
+        type: uuid
+        required: true
+        description: "Unique identifier"
+      expected_amount_minor:
+        type: integer
+        required: true
+        description: "Expected balance computed from successful payments and refunds"
+      actual_amount_minor:
+        type: integer
+        required: true
+        description: "Actual balance provided by operator or external source"
+      discrepancy_minor:
+        type: integer
+        required: true
+        description: "Difference between expected and actual (actual - expected)"
+      currency:
+        type: string
+        required: true
+        pattern: "^[A-Z]{3}$"
+        description: "ISO 4217 currency code"
+      status:
+        type: ReconciliationStatus
+        required: true
+        description: "Outcome of the reconciliation run"
+      notes:
+        type: string
+        required: false
+        description: "Operator notes or context"
+      run_at:
+        type: timestamp
+        required: true
+        description: "When the reconciliation was executed"
+      created_at:
+        type: timestamp
+        required: true
+        description: "Creation timestamp"
+    statuses:
+      - matched
+      - mismatched
+      - error
+
+  audit_record:
+    description: "Append-only historical fact about a performed action"
+    attributes:
+      audit_id:
+        type: uuid
+        required: true
+        description: "Unique identifier"
+      actor_id:
+        type: uuid
+        required: true
+        description: "Who performed the action"
+      actor_type:
+        type: string
+        required: true
+        enum:
+          - merchant
+          - administrator
+          - system
+        description: "Category of actor"
+      action:
+        type: string
+        required: true
+        description: "The action performed"
+      target_type:
+        type: string
+        required: true
+        description: "Type of resource acted upon"
+      target_id:
+        type: uuid
+        required: true
+        description: "Identifier of the resource acted upon"
+      details:
+        type: json
+        required: false
+        description: "Immutable payload with action-specific context"
+      occurred_at:
+        type: timestamp
+        required: true
+        description: "When the action occurred"
+      created_at:
+        type: timestamp
+        required: true
+        description: "When the audit record was persisted"
+
+transitions:
+  payment:
+    - from: pending
+      to: processing
+      precondition: "Payment is not already processing"
+      side_effect: "Start processing workflow"
+    - from: processing
+      to: successful
+      precondition: "Processing completed without error"
+      side_effect: "Emit payment.successful; unlock refund eligibility"
+    - from: processing
+      to: failed
+      precondition: "Processing completed with error"
+      side_effect: "Emit payment.failed; record failure_reason"
+    - from: successful
+      to: refunded
+      precondition: "Refund has been completed against this payment"
+      side_effect: "Emit payment.refunded"
+  refund:
+    - from: pending
+      to: processing
+      precondition: "Refund is not already processing"
+      side_effect: "Start refund processing workflow"
+    - from: processing
+      to: completed
+      precondition: "Processing completed without error"
+      side_effect: "Emit refund.completed; transition linked payment to refunded"
+    - from: processing
+      to: failed
+      precondition: "Processing completed with error"
+      side_effect: "Emit refund.failed; record failure_reason; payment remains successful"
+  notification_delivery_record:
+    - from: pending
+      to: delivered
+      precondition: "Delivery attempt succeeded"
+      side_effect: "Record delivery timestamp"
+    - from: pending
+      to: failed
+      precondition: "All delivery attempts exhausted"
+      side_effect: "Record last error"
+
+invariants:
+  - id: I-1
+    rule: "A Payment belongs to exactly one merchant (payment.merchant_id)"
+  - id: I-2
+    rule: "A Refund belongs to exactly one Payment; ownership is derived from the linked payment"
+  - id: I-3
+    rule: "At most one completed Refund per Payment in MVP scope"
+  - id: I-4
+    rule: "A Refund can only be created against a Payment with status successful"
+  - id: I-5
+    rule: "The refund amount must equal the original payment amount in MVP (full refund only)"
+  - id: I-6
+    rule: "A Payment transitions to refunded only after a Refund reaches completed"
+  - id: I-7
+    rule: "Terminal statuses cannot transition further"
+  - id: I-8
+    rule: "Audit Records are append-only; existing records cannot be modified or deleted"
+  - id: I-9
+    rule: "Domain event records are immutable after creation"
+  - id: I-10
+    rule: "Money values are stored as integers in minor units with an explicit ISO 4217 currency code"
+  - id: I-11
+    rule: "MVP enforces a single configured currency; payments with unsupported currencies are rejected"
+
+events:
+  envelope:
+    event_id:
+      type: uuid
+      required: true
+    event_type:
+      type: string
+      required: true
+    occurred_at:
+      type: timestamp
+      required: true
+    resource_id:
+      type: uuid
+      required: true
+    resource_type:
+      type: string
+      required: true
+      enum:
+        - payment
+        - refund
+    idempotency_key:
+      type: string
+      required: false
+    payload:
+      type: json
+      required: true
+    schema_version:
+      type: integer
+      required: true
+      default: 1
+
+  types:
+    payment.created:
+      trigger: "Payment entity created"
+      payload:
+        - payment_id
+        - merchant_id
+        - amount_minor
+        - currency
+        - created_at
+    payment.successful:
+      trigger: "Payment transitions from processing to successful"
+      payload:
+        - payment_id
+        - amount_minor
+        - currency
+        - processed_at
+    payment.failed:
+      trigger: "Payment transitions from processing to failed"
+      payload:
+        - payment_id
+        - amount_minor
+        - currency
+        - failure_reason
+        - processed_at
+    refund.created:
+      trigger: "Refund entity created"
+      payload:
+        - refund_id
+        - payment_id
+        - amount_minor
+        - currency
+        - created_at
+    refund.completed:
+      trigger: "Refund transitions from processing to completed"
+      payload:
+        - refund_id
+        - payment_id
+        - amount_minor
+        - currency
+        - processed_at
+
+commands:
+  create_payment:
+    idempotency_required: true
+    preconditions:
+      - "Merchant is authenticated"
+      - "Amount > 0"
+      - "Currency matches configured single currency"
+    output: "Payment entity with status pending"
+    conflict: "Return existing payment record without side effects"
+    events_emitted:
+      - payment.created
+
+  process_payment:
+    idempotency_required: false
+    preconditions:
+      - "Payment status is pending"
+    output: "Payment transitions to processing, then successful or failed"
+    events_emitted:
+      - payment.successful
+      - payment.failed
+
+  create_refund:
+    idempotency_required: true
+    preconditions:
+      - "Payment status is successful"
+      - "No completed refund exists for this payment"
+    output: "Refund entity with status pending"
+    conflict: "Return existing refund record without side effects"
+    events_emitted:
+      - refund.created
+
+  process_refund:
+    idempotency_required: false
+    preconditions:
+      - "Refund status is pending"
+      - "Linked payment status is successful"
+    output: "Refund transitions to processing, then completed or failed"
+    side_effects:
+      - "If completed, payment transitions to refunded"
+    events_emitted:
+      - refund.completed

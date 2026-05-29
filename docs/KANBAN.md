@@ -6,7 +6,6 @@ Source: [PRD.md](./PRD.md)
 
 ### Ready
 
-- [MPG-001](#mpg-001-define-core-domain-model)
 - [MPG-002](#mpg-002-set-up-project-foundation)
 - [MPG-003](#mpg-003-implement-authentication-and-user-roles)
 - [MPG-004](#mpg-004-create-audit-logging)
@@ -40,7 +39,7 @@ No tickets currently assigned.
 
 ### Done
 
-No tickets completed yet.
+- [MPG-001](#mpg-001-define-core-domain-model)
 
 ---
 
