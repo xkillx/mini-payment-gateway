@@ -79,8 +79,8 @@ An append-only historical fact about a performed action.
 | Attribute | Type | Required | Description |
 |---|---|---|---|
 | `audit_id` | UUID | Yes | Unique identifier for this audit record |
-| `actor_id` | UUID | Yes | Who performed the action (user or system) |
-| `actor_type` | String | Yes | Category of actor: `merchant`, `administrator`, `system` |
+| `actor_id` | UUID | No | Who performed the action (absent when principal is unknown) |
+| `actor_type` | String | Yes | Category of actor: `merchant`, `administrator`, `system`, `unknown` |
 | `action` | String | Yes | The action performed (e.g., `payment.created`, `refund.completed`) |
 | `target_type` | String | Yes | Type of resource acted upon (e.g., `payment`, `refund`) |
 | `target_id` | UUID | Yes | Identifier of the resource acted upon |

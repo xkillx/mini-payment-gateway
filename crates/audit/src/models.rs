@@ -5,7 +5,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AuditRecord {
     pub id: Uuid,
-    pub actor_id: Uuid,
+    pub actor_id: Option<Uuid>,
+    pub actor_type: String,
     pub action: String,
     pub resource_type: String,
     pub resource_id: String,

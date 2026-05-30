@@ -5,18 +5,21 @@ use shared_observability as observability;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-mod auth_layer;
-mod router;
+use api::state::AppState;
 
 #[tokio::main]
 async fn main() {
     let config = AppConfig::from_env();
     observability::init(&config.log_level);
 
-    let _pool = db::connect(&config.database_url).await;
+    let pool = db::connect(&config.database_url).await;
+    let state = AppState {
+        config: config.clone(),
+        pool,
+    };
 
     let app = Router::new()
-        .merge(router::build(config.clone()))
+        .merge(api::router::build(state))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .layer(shared_http::middleware::request_id_layer())

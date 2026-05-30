@@ -36,13 +36,14 @@ impl AuditRepository for PostgresAuditRepository {
     async fn insert(&self, record: &AuditRecord) -> Result<AuditRecord, sqlx::Error> {
         sqlx::query_as::<_, AuditRecord>(
             r#"
-            INSERT INTO audit_records (id, actor_id, action, resource_type, resource_id, details, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO audit_records (id, actor_id, actor_type, action, resource_type, resource_id, details, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
         )
         .bind(record.id)
         .bind(record.actor_id)
+        .bind(&record.actor_type)
         .bind(&record.action)
         .bind(&record.resource_type)
         .bind(&record.resource_id)

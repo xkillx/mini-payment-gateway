@@ -48,12 +48,49 @@ cargo run -p migrate -- seed
 
 Two actors are seeded with deterministic IDs:
 
-| Actor       | ID                                   | Role          |
-|-------------|--------------------------------------|---------------|
-| Merchant    | `00000000-0000-0000-0000-000000000001` | merchant      |
-| Admin       | `00000000-0000-0000-0000-000000000002` | administrator |
+| Actor       | Actor ID (sub)                        | Role          | Merchant Account ID                   |
+|-------------|----------------------------------------|---------------|----------------------------------------|
+| Merchant    | `00000000-0000-0000-0000-000000000001` | merchant      | `00000000-0000-0000-0000-000000000001` |
+| Admin       | `00000000-0000-0000-0000-000000000002` | administrator | (none)                                 |
 
-Run `cargo run -p migrate -- seed` to insert seed data (idempotent via ON CONFLICT DO NOTHING).
+The **Actor ID** (`sub` in JWT) identifies the authenticated party.
+The **Merchant Account ID** (`merchant_id` in JWT and DB) identifies the business account owning payments and refunds.
+
+Run `cargo run -p migrate -- seed` to insert seed data (upsert with ON CONFLICT DO UPDATE).
+
+## Authentication
+
+### Bearer JWT Contract
+
+All `/api/v1` routes require `Authorization: Bearer <jwt>`. The JWT must:
+
+- Be signed with HS256 using `JWT_SECRET` from the environment
+- Include `sub` (Actor ID UUID), `role` (`merchant` or `administrator`), and `exp` (unexpired)
+- Include `merchant_id` (Merchant Account ID UUID) for merchant tokens
+- Omit `merchant_id` for administrator tokens
+
+`GET /health` is public (no auth required).
+
+### Role Permissions
+
+| Route family | Merchant | Administrator |
+|---|---|---|
+| `GET /api/v1/payments`, `GET /api/v1/refunds` | Yes | Yes |
+| `POST /api/v1/payments`, `POST /api/v1/refunds` | Yes | No |
+| `/api/v1/notifications`, `/api/v1/reconciliation` | No | Yes |
+| `/api/v1/audit`, `/api/v1/reporting`, `/api/v1/admin` | No | Yes |
+
+### Generate a Developer Token
+
+```bash
+# Merchant token
+cargo run -p shared-auth --example generate_token -- merchant
+
+# Administrator token
+cargo run -p shared-auth --example generate_token -- administrator
+```
+
+Set `JWT_SECRET` env var or it defaults to `dev-secret-change-in-production`.
 
 ## Testing
 

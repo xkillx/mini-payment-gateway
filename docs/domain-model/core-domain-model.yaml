@@ -221,8 +221,8 @@ entities:
         description: "Unique identifier"
       actor_id:
         type: uuid
-        required: true
-        description: "Who performed the action"
+        required: false
+        description: "Who performed the action (absent when principal is unknown)"
       actor_type:
         type: string
         required: true
@@ -230,6 +230,7 @@ entities:
           - merchant
           - administrator
           - system
+          - unknown
         description: "Category of actor"
       action:
         type: string

@@ -37,8 +37,28 @@ Reconciliation Status expresses the outcome of a Reconciliation run: matched, mi
 _Avoid_: Reconciliation processing state
 
 **Audit Record**:
-An Audit Record is an append-only historical fact about who performed which action on which resource and when.
+An Audit Record is an append-only historical fact about who performed or attempted which action on which resource and when.
 _Avoid_: Mutable activity log
+
+**Actor**:
+An Actor is an authenticated party that performs actions in the gateway and can be referenced by an Audit Record.
+_Avoid_: User, account
+
+**Merchant**:
+A Merchant is an Actor role scoped to one Merchant Account and its Payments and Refunds.
+_Avoid_: Customer, seller account
+
+**Merchant Account**:
+A Merchant Account is the business owner of Payments and Refunds.
+_Avoid_: Merchant user, customer account
+
+**Administrator**:
+An Administrator is an Actor role with platform operations responsibility across merchants.
+_Avoid_: Admin user, superuser
+
+**Unknown Principal**:
+An Unknown Principal is a party whose identity could not be authenticated but whose access attempt may still be recorded.
+_Avoid_: Anonymous user, guest actor
 
 ## Flagged ambiguities
 
@@ -46,6 +66,9 @@ _Avoid_: Mutable activity log
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
 - MVP uses full refunds only; "partial refund" is future scope and must not be implied by "refunded".
 - MVP refund behavior is one full Refund per successful Payment; multiple or partial refunds are future scope.
+- "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
+- **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
+- Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.
 
 ## Example dialogue
 
@@ -53,3 +76,7 @@ _Avoid_: Mutable activity log
 - Domain expert: "Yes, if the payment is pending and not already processing."
 - Dev: "Is this payment refunded?"
 - Domain expert: "Only when the full original amount has been refunded."
+- Dev: "Can this actor see every payment?"
+- Domain expert: "Only if the actor is an Administrator. A Merchant sees Payments for its own Merchant Account."
+- Dev: "Who is recorded when authentication fails before we know the party?"
+- Domain expert: "Record an Unknown Principal, because no Actor has been authenticated yet."

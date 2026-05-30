@@ -3,6 +3,14 @@ name = "api"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "api"
+path = "src/main.rs"
+
 [dependencies]
 shared-config = { path = "../../crates/shared-config" }
 shared-db = { path = "../../crates/shared-db" }
@@ -26,3 +34,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+sqlx = { workspace = true }
+
+[dev-dependencies]
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+tower = { workspace = true, features = ["util"] }

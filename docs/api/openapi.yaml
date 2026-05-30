@@ -31,25 +31,33 @@ paths:
   /api/v1/payments:
     get:
       operationId: listPayments
-      summary: List payments
+      summary: List payments (Merchant or Administrator)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
     post:
       operationId: createPayment
-      summary: Create a payment
+      summary: Create a payment (Merchant only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/payments/{id}:
     get:
       operationId: getPayment
-      summary: Get a payment by ID
+      summary: Get a payment by ID (Merchant or Administrator)
       security:
         - bearerAuth: []
       parameters:
@@ -60,31 +68,43 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/refunds:
     get:
       operationId: listRefunds
-      summary: List refunds
+      summary: List refunds (Merchant or Administrator)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
     post:
       operationId: createRefund
-      summary: Create a refund
+      summary: Create a refund (Merchant only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/refunds/{id}:
     get:
       operationId: getRefund
-      summary: Get a refund by ID
+      summary: Get a refund by ID (Merchant or Administrator)
       security:
         - bearerAuth: []
       parameters:
@@ -95,23 +115,31 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/notifications:
     get:
       operationId: listNotifications
-      summary: List notification delivery records
+      summary: List notification delivery records (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/notifications/{id}/retry:
     post:
       operationId: retryNotification
-      summary: Retry a failed notification
+      summary: Retry a failed notification (Administrator only)
       security:
         - bearerAuth: []
       parameters:
@@ -122,54 +150,78 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/reconciliation:
     get:
       operationId: listReconciliations
-      summary: List reconciliation records
+      summary: List reconciliation records (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
     post:
       operationId: runReconciliation
-      summary: Run a reconciliation
+      summary: Run a reconciliation (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/audit:
     get:
       operationId: listAuditRecords
-      summary: List audit records
+      summary: List audit records (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/reporting/payment-summary:
     get:
       operationId: paymentSummary
-      summary: Get payment summary report
+      summary: Get payment summary report (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
   /api/v1/admin/actors:
     get:
       operationId: listActors
-      summary: List actors
+      summary: List actors (Administrator only)
       security:
         - bearerAuth: []
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "501":
           $ref: "#/components/responses/NotImplemented"
 
@@ -181,6 +233,28 @@ components:
       bearerFormat: JWT
 
   responses:
+    Unauthorized:
+      description: Authentication failed — missing, malformed, expired, or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            code: UNAUTHORIZED
+            message: Authentication failed
+            request_id: "01901234-5678-7000-8000-000000000001"
+
+    Forbidden:
+      description: Authenticated actor lacks the required role
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            code: FORBIDDEN
+            message: Insufficient permissions
+            request_id: "01901234-5678-7000-8000-000000000002"
+
     NotImplemented:
       description: Not Implemented
       content:
