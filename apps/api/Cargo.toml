@@ -1,0 +1,28 @@
+[package]
+name = "api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared-config = { path = "../../crates/shared-config" }
+shared-db = { path = "../../crates/shared-db" }
+shared-http = { path = "../../crates/shared-http" }
+shared-observability = { path = "../../crates/shared-observability" }
+shared-auth = { path = "../../crates/shared-auth" }
+payments = { path = "../../crates/payments" }
+refunds = { path = "../../crates/refunds" }
+notifications = { path = "../../crates/notifications" }
+reconciliation = { path = "../../crates/reconciliation" }
+audit = { path = "../../crates/audit" }
+reporting = { path = "../../crates/reporting" }
+admin = { path = "../../crates/admin" }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

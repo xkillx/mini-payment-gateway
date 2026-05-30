@@ -1,0 +1,11 @@
+/target
+.env
+*.swp
+*.swo
+.DS_Store
+*.rs.bk
+*.pyc
+__pycache__/
+.vscode/
+.idea/
+*.iml

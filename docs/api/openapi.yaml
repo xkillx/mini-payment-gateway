@@ -1,0 +1,210 @@
+openapi: "3.0.3"
+info:
+  title: Mini Payment Gateway API
+  version: "0.1.0"
+  description: Backend API for the Mini Payment Gateway MVP
+
+servers:
+  - url: http://localhost:4000
+    description: Local development
+
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 0.1.0
+
+  /api/v1/payments:
+    get:
+      operationId: listPayments
+      summary: List payments
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+    post:
+      operationId: createPayment
+      summary: Create a payment
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/payments/{id}:
+    get:
+      operationId: getPayment
+      summary: Get a payment by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/refunds:
+    get:
+      operationId: listRefunds
+      summary: List refunds
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+    post:
+      operationId: createRefund
+      summary: Create a refund
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/refunds/{id}:
+    get:
+      operationId: getRefund
+      summary: Get a refund by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      summary: List notification delivery records
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/notifications/{id}/retry:
+    post:
+      operationId: retryNotification
+      summary: Retry a failed notification
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/reconciliation:
+    get:
+      operationId: listReconciliations
+      summary: List reconciliation records
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+    post:
+      operationId: runReconciliation
+      summary: Run a reconciliation
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/audit:
+    get:
+      operationId: listAuditRecords
+      summary: List audit records
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/reporting/payment-summary:
+    get:
+      operationId: paymentSummary
+      summary: Get payment summary report
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/actors:
+    get:
+      operationId: listActors
+      summary: List actors
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    NotImplemented:
+      description: Not Implemented
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required:
+        - code
+        - message
+        - request_id
+      properties:
+        code:
+          type: string
+          example: NOT_IMPLEMENTED
+        message:
+          type: string
+          example: payments.list
+        request_id:
+          type: string
+          format: uuid
+        details:
+          type: object
+          nullable: true

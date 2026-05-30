@@ -1,0 +1,13 @@
+[package]
+name = "migrate"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared-config = { path = "../../crates/shared-config" }
+shared-db = { path = "../../crates/shared-db" }
+
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

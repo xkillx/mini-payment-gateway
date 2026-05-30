@@ -1,0 +1,10 @@
+[package]
+name = "shared-auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+jsonwebtoken = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }

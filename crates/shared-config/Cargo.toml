@@ -1,0 +1,8 @@
+[package]
+name = "shared-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+dotenvy = { workspace = true }

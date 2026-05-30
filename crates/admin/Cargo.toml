@@ -1,0 +1,15 @@
+[package]
+name = "admin"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+sqlx = { workspace = true }
+shared-auth = { path = "../shared-auth" }
+shared-http = { path = "../shared-http" }

@@ -1,0 +1,20 @@
+[package]
+name = "worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared-config = { path = "../../crates/shared-config" }
+shared-db = { path = "../../crates/shared-db" }
+shared-observability = { path = "../../crates/shared-observability" }
+notifications = { path = "../../crates/notifications" }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
