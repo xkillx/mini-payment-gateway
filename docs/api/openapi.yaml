@@ -189,13 +189,111 @@ paths:
       summary: List audit records (Administrator only)
       security:
         - bearerAuth: []
+      parameters:
+        - name: actor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter by actor ID
+        - name: actor_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [merchant, administrator, system, unknown]
+          description: Filter by actor type
+        - name: resource_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by resource type
+        - name: resource_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by resource ID
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by action name
+        - name: occurred_from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Include records occurred at or after this timestamp
+        - name: occurred_to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Include records occurred at or before this timestamp
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of records to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of records to skip
       responses:
+        "200":
+          description: List of audit records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditRecordListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/audit/{id}:
+    get:
+      operationId: getAuditRecord
+      summary: Get an audit record by ID (Administrator only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Audit record ID
+      responses:
+        "200":
+          description: Audit record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/reporting/payment-summary:
     get:
@@ -262,6 +360,20 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
 
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
   schemas:
     ErrorEnvelope:
       type: object
@@ -282,3 +394,67 @@ components:
         details:
           type: object
           nullable: true
+
+    AuditRecord:
+      type: object
+      required:
+        - id
+        - actor_type
+        - action
+        - resource_type
+        - resource_id
+        - occurred_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for this audit record
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Who performed the action (null when principal is unknown)
+        actor_type:
+          type: string
+          enum: [merchant, administrator, system, unknown]
+          description: Category of actor
+        action:
+          type: string
+          description: The action performed (e.g., auth.authentication_failed, payment.created)
+        resource_type:
+          type: string
+          description: Type of resource acted upon (e.g., auth, payment, refund)
+        resource_id:
+          type: string
+          description: Identifier of the resource acted upon (may not be a UUID)
+        details:
+          type: object
+          nullable: true
+          description: Immutable payload with action-specific context
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the action occurred
+        created_at:
+          type: string
+          format: date-time
+          description: When the audit record was persisted
+
+    AuditRecordListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditRecord"
+        limit:
+          type: integer
+          description: Maximum number of records returned
+        offset:
+          type: integer
+          description: Number of records skipped

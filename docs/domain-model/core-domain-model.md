@@ -82,8 +82,8 @@ An append-only historical fact about a performed action.
 | `actor_id` | UUID | No | Who performed the action (absent when principal is unknown) |
 | `actor_type` | String | Yes | Category of actor: `merchant`, `administrator`, `system`, `unknown` |
 | `action` | String | Yes | The action performed (e.g., `payment.created`, `refund.completed`) |
-| `target_type` | String | Yes | Type of resource acted upon (e.g., `payment`, `refund`) |
-| `target_id` | UUID | Yes | Identifier of the resource acted upon |
+| `resource_type` | String | Yes | Type of resource acted upon (e.g., `auth`, `payment`, `refund`) |
+| `resource_id` | String | Yes | Identifier of the resource acted upon (text, not necessarily UUID) |
 | `details` | JSON | No | Immutable payload with action-specific context |
 | `occurred_at` | Timestamp | Yes | When the action occurred |
 | `created_at` | Timestamp | Yes | When the audit record was persisted |

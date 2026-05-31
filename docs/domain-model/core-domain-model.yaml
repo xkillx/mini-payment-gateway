@@ -236,14 +236,14 @@ entities:
         type: string
         required: true
         description: "The action performed"
-      target_type:
+      resource_type:
         type: string
         required: true
-        description: "Type of resource acted upon"
-      target_id:
-        type: uuid
+        description: "Type of resource acted upon (e.g., auth, payment, refund)"
+      resource_id:
+        type: string
         required: true
-        description: "Identifier of the resource acted upon"
+        description: "Identifier of the resource acted upon (text, not necessarily UUID)"
       details:
         type: json
         required: false

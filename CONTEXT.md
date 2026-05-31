@@ -44,6 +44,10 @@ _Avoid_: Mutable activity log
 An Actor is an authenticated party that performs actions in the gateway and can be referenced by an Audit Record.
 _Avoid_: User, account
 
+**Resource**:
+A Resource is the domain or operational object that an Audit Record says was acted upon.
+_Avoid_: Target
+
 **Merchant**:
 A Merchant is an Actor role scoped to one Merchant Account and its Payments and Refunds.
 _Avoid_: Customer, seller account
@@ -56,9 +60,17 @@ _Avoid_: Merchant user, customer account
 An Administrator is an Actor role with platform operations responsibility across merchants.
 _Avoid_: Admin user, superuser
 
+**Administrative Action**:
+An Administrative Action is an administrator-initiated state-changing platform operation.
+_Avoid_: Administrator read, admin page view
+
 **Unknown Principal**:
 An Unknown Principal is a party whose identity could not be authenticated but whose access attempt may still be recorded.
 _Avoid_: Anonymous user, guest actor
+
+**System Principal**:
+A System Principal is the gateway itself acting without an authenticated human or merchant Actor.
+_Avoid_: System user, service account
 
 ## Flagged ambiguities
 
@@ -69,6 +81,9 @@ _Avoid_: Anonymous user, guest actor
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
 - Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.
+- Authentication failures may include unverified identity claims, but those claims do not establish an **Actor**.
+- Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.
+- System-initiated work uses a **System Principal**, not an **Actor** or **Unknown Principal**.
 
 ## Example dialogue
 

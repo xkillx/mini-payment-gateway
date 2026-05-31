@@ -104,7 +104,9 @@ dependencies = [
  "shared-http",
  "sqlx",
  "thiserror",
+ "tracing",
  "uuid",
+ "validator",
 ]
 
 [[package]]

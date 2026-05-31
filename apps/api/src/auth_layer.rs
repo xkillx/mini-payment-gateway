@@ -3,11 +3,9 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use chrono::Utc;
 use shared_auth::{parse_authorization_header, parse_claims, Actor, AuthError, Role};
 use shared_http::error::ErrorEnvelope;
 use shared_http::middleware::get_request_id;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -232,6 +230,11 @@ pub async fn require_role(req: Request, next: Next, allowed_roles: Vec<Role>) ->
         Role::Administrator => "administrator",
     };
 
+    let actor_type = match actor_role {
+        Role::Merchant => audit::models::ActorType::MERCHANT,
+        Role::Administrator => audit::models::ActorType::ADMINISTRATOR,
+    };
+
     let details = serde_json::json!({
         "request_method": req.method().to_string(),
         "request_path": req.uri().path().to_string(),
@@ -239,21 +242,16 @@ pub async fn require_role(req: Request, next: Next, allowed_roles: Vec<Role>) ->
         "authenticated_role": authenticated_role,
     });
 
-    let actor_type = match actor_role {
-        Role::Merchant => "merchant",
-        Role::Administrator => "administrator",
-    };
-
     if let Some(state) = state {
-        write_audit_record(
-            &state.pool,
-            &request_id,
-            "auth.authorization_failed",
+        let record = audit::service::new_audit_record(
             Some(actor.actor_id()),
             actor_type,
-            details,
-        )
-        .await;
+            audit::models::actions::AUTH_AUTHORIZATION_FAILED,
+            "auth",
+            &request_id,
+            Some(details),
+        );
+        audit::service::record_best_effort(&state.pool, record).await;
     }
 
     let envelope = ErrorEnvelope::new("FORBIDDEN", "Insufficient permissions", &request_id);
@@ -268,7 +266,7 @@ pub async fn merchant_write_guard(req: Request, next: Next) -> Response {
 }
 
 async fn auth_failure(
-    pool: &PgPool,
+    pool: &sqlx::PgPool,
     request_id: &str,
     failure_kind: &str,
     claimed_actor_id: Option<Uuid>,
@@ -289,50 +287,18 @@ async fn auth_failure(
     }
     details["request_id"] = serde_json::json!(request_id);
 
-    write_audit_record(
-        pool,
+    let record = audit::service::new_audit_record(
+        None,
+        audit::models::ActorType::UNKNOWN,
+        audit::models::actions::AUTH_AUTHENTICATION_FAILED,
+        "auth",
         request_id,
-        "auth.authentication_failed",
-        claimed_actor_id,
-        "unknown",
-        details,
-    )
-    .await;
+        Some(details),
+    );
+    audit::service::record_best_effort(pool, record).await;
 
     let envelope = ErrorEnvelope::new("UNAUTHORIZED", "Authentication failed", request_id);
     (StatusCode::UNAUTHORIZED, Json(envelope)).into_response()
-}
-
-async fn write_audit_record(
-    pool: &PgPool,
-    request_id: &str,
-    action: &str,
-    actor_id: Option<Uuid>,
-    actor_type: &str,
-    details: serde_json::Value,
-) {
-    let id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    let now = Utc::now();
-    let result = sqlx::query(
-        r#"
-        INSERT INTO audit_records (id, actor_id, actor_type, action, resource_type, resource_id, details, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#,
-    )
-    .bind(id)
-    .bind(actor_id)
-    .bind(actor_type)
-    .bind(action)
-    .bind("auth")
-    .bind(request_id)
-    .bind(serde_json::to_value(&details).ok())
-    .bind(now)
-    .execute(pool)
-    .await;
-
-    if let Err(e) = result {
-        tracing::error!(path = %request_id, action = %action, error = %e, "Failed to write auth audit record");
-    }
 }
 
 fn internal_error(msg: &str) -> Response {

@@ -35,7 +35,10 @@ pub fn build(state: AppState) -> Router {
     let admin_routes = role_guard(admin::routes::routes(), admin_only.clone());
     let notifications_routes = role_guard(notifications::routes::routes(), admin_only.clone());
     let reconciliation_routes = role_guard(reconciliation::routes::routes(), admin_only.clone());
-    let audit_routes = role_guard(audit::routes::routes(), admin_only.clone());
+    let audit_routes = role_guard(
+        audit::routes::routes(state.pool.clone()),
+        admin_only.clone(),
+    );
     let reporting_routes = role_guard(reporting::routes::routes(), admin_only);
 
     let v1_router = Router::new()

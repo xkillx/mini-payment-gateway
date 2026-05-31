@@ -116,15 +116,17 @@ async fn protected_route_without_auth_returns_401() {
 
     assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
 
-    let audit: Vec<(String, String)> = sqlx::query_as(
-        "SELECT action, actor_type FROM audit_records WHERE resource_type = 'auth' ORDER BY created_at DESC LIMIT 1",
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM audit_records WHERE action = 'auth.authentication_failed' AND resource_type = 'auth')",
     )
-    .fetch_all(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(audit.len(), 1);
-    assert_eq!(audit[0].0, "auth.authentication_failed");
+    assert!(
+        exists,
+        "Expected an auth.authentication_failed audit record to exist"
+    );
 }
 
 #[tokio::test]
@@ -205,15 +207,17 @@ async fn merchant_on_admin_route_returns_403() {
 
     assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 
-    let audit: Vec<(String, String)> = sqlx::query_as(
-        "SELECT action, actor_type FROM audit_records WHERE resource_type = 'auth' AND action = 'auth.authorization_failed' ORDER BY created_at DESC LIMIT 1",
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM audit_records WHERE action = 'auth.authorization_failed' AND resource_type = 'auth')",
     )
-    .fetch_all(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(audit.len(), 1);
-    assert_eq!(audit[0].0, "auth.authorization_failed");
+    assert!(
+        exists,
+        "Expected an auth.authorization_failed audit record to exist"
+    );
 }
 
 #[tokio::test]
