@@ -18,7 +18,8 @@ The primary aggregate for the charge lifecycle. Created when a merchant initiate
 | `currency` | String(3) | Yes | ISO 4217 currency code (single configured currency for MVP) |
 | `status` | PaymentStatus | Yes | Current lifecycle position |
 | `failure_reason` | String | No | Reason for failure if status is `failed` |
-| `idempotency_key` | String | No | Client-supplied key for idempotent creation |
+| `idempotency_key` | String | Yes | Client-supplied key for idempotent creation |
+| `metadata` | JSON | Yes | Merchant-supplied creation context for reconciliation and lookup |
 | `created_at` | Timestamp | Yes | When the payment was created |
 | `updated_at` | Timestamp | Yes | When the payment was last modified |
 
@@ -197,6 +198,8 @@ Transitions: reconciliation records are created with a final status; no lifecycl
 
 **Outcome:** Idempotent replay — no duplicate payment. Same payment ID returned.
 
+If the same Merchant sends the same idempotency key with a different Payment Amount, Configured Currency, or Payment Metadata, the command is rejected as a conflict and no new side effects are produced.
+
 ---
 
 ## 4. Domain Events
@@ -221,7 +224,7 @@ Every domain event uses the following immutable envelope:
 #### `payment.created`
 
 - **Trigger:** Payment entity created via create payment command.
-- **Payload:** `payment_id`, `merchant_id`, `amount_minor`, `currency`, `created_at`
+- **Payload:** `payment_id`, `merchant_id`, `amount_minor`, `currency`, `metadata`, `idempotency_key`, `created_at`
 
 #### `payment.successful`
 
@@ -264,9 +267,9 @@ Each domain event type triggers creation of a Notification Delivery Record with 
 | Aspect | Detail |
 |---|---|
 | **Idempotency key required** | Yes |
-| **Preconditions** | Merchant is authenticated; amount > 0; currency matches configured single currency |
+| **Preconditions** | Merchant is authenticated; amount > 0 in minor units; currency matches configured single currency; metadata is an object when supplied |
 | **Output** | Payment entity with status `pending` |
-| **Conflict (duplicate key)** | Return existing payment record without side effects |
+| **Conflict (duplicate key)** | Equivalent replay returns existing payment without side effects; same key with different amount, currency, or metadata is rejected as a conflict |
 | **Events emitted** | `payment.created` |
 
 ### 5.2 Process Payment

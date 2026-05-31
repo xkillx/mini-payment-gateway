@@ -44,6 +44,19 @@ cargo run -p migrate -- check
 cargo run -p migrate -- seed
 ```
 
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgres://payment:payment@localhost:5432/payment_gateway` | PostgreSQL connection string |
+| `APP_PORT` | `4000` | HTTP server port |
+| `JWT_SECRET` | `dev-secret-change-in-production` | HS256 signing key for JWTs |
+| `LOG_LEVEL` | `info` | Log level |
+| `WORKER_POLL_INTERVAL_MS` | `1000` | Background worker poll interval |
+| `NOTIFICATION_MAX_ATTEMPTS` | `5` | Max notification delivery attempts |
+| `NOTIFICATION_RETRY_DELAYS_SECS` | `30,120,600,1800,7200` | Comma-separated retry delay seconds |
+| `PAYMENT_CURRENCY` | `USD` | Configured Currency — only this currency is accepted for Payment and Refund amounts |
+
 ## Seed Data
 
 Two actors are seeded with deterministic IDs:

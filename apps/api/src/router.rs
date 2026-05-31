@@ -26,7 +26,10 @@ pub fn build(state: AppState) -> Router {
     let merchant_or_admin = vec![Role::Merchant, Role::Administrator];
     let admin_only = vec![Role::Administrator];
 
-    let payments = merchant_scoped_guard(payments::routes::routes());
+    let payments = merchant_scoped_guard(payments::routes::routes(
+        state.pool.clone(),
+        state.config.payment_currency.clone(),
+    ));
     let payments = role_guard(payments, merchant_or_admin.clone());
 
     let refunds = merchant_scoped_guard(refunds::routes::routes());

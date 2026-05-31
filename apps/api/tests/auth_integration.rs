@@ -282,7 +282,7 @@ async fn admin_post_payments_returns_403() {
 }
 
 #[tokio::test]
-async fn merchant_post_payments_reaches_handler_501() {
+async fn merchant_post_payments_reaches_handler_422_without_idempotency() {
     let pool = setup_db().await;
     let app = build_app(pool.clone()).await;
 
@@ -293,11 +293,21 @@ async fn merchant_post_payments_reaches_handler_501() {
                 .method("POST")
                 .uri("/api/v1/payments")
                 .header("Authorization", format!("Bearer {token}"))
-                .body(axum::body::Body::empty())
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "amount_minor": 1000,
+                        "currency": "USD"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), axum::http::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
 }

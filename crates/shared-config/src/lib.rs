@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub worker_poll_interval_ms: u64,
     pub notification_max_attempts: u32,
     pub notification_retry_delays_secs: Vec<u64>,
+    pub payment_currency: String,
 }
 
 impl Default for AppConfig {
@@ -22,6 +23,7 @@ impl Default for AppConfig {
             worker_poll_interval_ms: 1000,
             notification_max_attempts: 5,
             notification_retry_delays_secs: vec![30, 120, 600, 1800, 7200],
+            payment_currency: "USD".into(),
         }
     }
 }
@@ -40,6 +42,14 @@ impl AppConfig {
                 .split(',')
                 .filter_map(|s| s.trim().parse().ok())
                 .collect(),
+            payment_currency: {
+                let v = env_var("PAYMENT_CURRENCY");
+                if v.is_empty() {
+                    "USD".into()
+                } else {
+                    v
+                }
+            },
         }
     }
 }
@@ -61,6 +71,7 @@ impl Debug for AppConfig {
                 "notification_retry_delays_secs",
                 &self.notification_retry_delays_secs,
             )
+            .field("payment_currency", &self.payment_currency)
             .finish()
     }
 }

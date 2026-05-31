@@ -45,8 +45,12 @@ entities:
         description: "Reason for failure if status is failed"
       idempotency_key:
         type: string
-        required: false
+        required: true
         description: "Client-supplied key for idempotent creation"
+      metadata:
+        type: json
+        required: true
+        description: "Merchant-supplied creation context for reconciliation and lookup"
       created_at:
         type: timestamp
         required: true
@@ -361,6 +365,8 @@ events:
         - merchant_id
         - amount_minor
         - currency
+        - metadata
+        - idempotency_key
         - created_at
     payment.successful:
       trigger: "Payment transitions from processing to successful"
@@ -399,10 +405,11 @@ commands:
     idempotency_required: true
     preconditions:
       - "Merchant is authenticated"
-      - "Amount > 0"
+      - "Amount > 0 in minor units"
       - "Currency matches configured single currency"
+      - "Metadata is an object when supplied"
     output: "Payment entity with status pending"
-    conflict: "Return existing payment record without side effects"
+    conflict: "Equivalent replay returns existing payment without side effects; same key with different amount, currency, or metadata is rejected as a conflict"
     events_emitted:
       - payment.created
 

@@ -46,13 +46,44 @@ paths:
       summary: Create a payment (Merchant only)
       security:
         - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: Unique key for idempotent payment creation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
       responses:
+        "201":
+          description: Payment created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "200":
+          description: Idempotent replay — same payment returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/payments/{id}:
     get:
@@ -374,6 +405,20 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
 
+    Conflict:
+      description: The request conflicts with the current state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
   schemas:
     ErrorEnvelope:
       type: object
@@ -394,6 +439,72 @@ components:
         details:
           type: object
           nullable: true
+
+    CreatePaymentRequest:
+      type: object
+      required:
+        - amount_minor
+        - currency
+      properties:
+        amount_minor:
+          type: integer
+          minimum: 1
+          description: Payment Amount in minor units (e.g., cents)
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: ISO 4217 currency code — must match the gateway's Configured Currency (default USD)
+        metadata:
+          type: object
+          description: Optional Payment Metadata for merchant reconciliation. Must be a JSON object ≤4096 bytes serialized. Defaults to {}.
+          default: {}
+      additionalProperties: false
+
+    PaymentResponse:
+      type: object
+      required:
+        - id
+        - amount_minor
+        - currency
+        - status
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Payment ID
+        amount_minor:
+          type: integer
+          description: Payment Amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        metadata:
+          type: object
+          description: Payment Metadata attached at creation
+        created_at:
+          type: string
+          format: date-time
+          description: When the Payment was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Payment was last updated
+
+    PaymentStatus:
+      type: string
+      enum:
+        - pending
+        - processing
+        - successful
+        - failed
+        - refunded
+      description: Current status of the Payment lifecycle
 
     AuditRecord:
       type: object

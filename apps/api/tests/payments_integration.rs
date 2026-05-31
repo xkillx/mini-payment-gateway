@@ -1,0 +1,537 @@
+use axum::body::Body;
+use axum::http::Request;
+use axum::Router;
+use serde_json::json;
+use shared_config::AppConfig;
+use shared_db as db;
+use sqlx::PgPool;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+use api::router;
+
+const MERCHANT_ACTOR_ID: &str = "00000000-0000-0000-0000-000000000001";
+const SECRET: &str = "dev-secret-change-in-production";
+
+#[derive(serde::Serialize)]
+struct TestClaims {
+    sub: String,
+    role: String,
+    merchant_id: Option<String>,
+    exp: usize,
+}
+
+fn make_token(claims: TestClaims) -> String {
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(SECRET.as_bytes()),
+    )
+    .unwrap()
+}
+
+fn merchant_token() -> String {
+    make_token(TestClaims {
+        sub: MERCHANT_ACTOR_ID.into(),
+        role: "merchant".into(),
+        merchant_id: Some(MERCHANT_ACTOR_ID.into()),
+        exp: 9999999999,
+    })
+}
+
+fn admin_token() -> String {
+    make_token(TestClaims {
+        sub: "00000000-0000-0000-0000-000000000002".into(),
+        role: "administrator".into(),
+        merchant_id: None,
+        exp: 9999999999,
+    })
+}
+
+async fn build_app(pool: PgPool) -> Router {
+    let config = AppConfig {
+        jwt_secret: SECRET.into(),
+        ..AppConfig::default()
+    };
+    let state = api::state::AppState { config, pool };
+    router::build(state)
+}
+
+async fn setup_db() -> PgPool {
+    let database_url = std::env::var("TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://mac@localhost:5432/mpg_testdb".into());
+    db::connect(&database_url).await
+}
+
+fn new_uuid_v7() -> Uuid {
+    Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext))
+}
+
+fn new_idempotency_key() -> String {
+    format!("test-key-{}", new_uuid_v7())
+}
+
+async fn send_request(
+    app: &mut Router,
+    method: axum::http::Method,
+    uri: &str,
+    token: &str,
+    idempotency_key: Option<&str>,
+    body: Option<serde_json::Value>,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json");
+
+    if let Some(key) = idempotency_key {
+        builder = builder.header("Idempotency-Key", key);
+    }
+
+    let body_bytes = body
+        .map(|b| serde_json::to_vec(&b).unwrap())
+        .unwrap_or_default();
+
+    let response = app
+        .oneshot(builder.body(Body::from(body_bytes)).unwrap())
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    (status, value)
+}
+
+#[tokio::test]
+async fn merchant_creates_payment_returns_201() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let idem_key = new_idempotency_key();
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"order_ref": "ORD-123"}
+        })),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    assert_eq!(body["amount_minor"], 1000);
+    assert_eq!(body["currency"], "USD");
+    assert_eq!(body["status"], "pending");
+    assert_eq!(body["metadata"]["order_ref"], "ORD-123");
+    assert!(body["id"].as_str().unwrap().len() > 0);
+    assert!(body["created_at"].as_str().unwrap().len() > 0);
+    assert!(body["updated_at"].as_str().unwrap().len() > 0);
+    assert!(body.get("merchant_id").is_none());
+    assert!(body.get("idempotency_key").is_none());
+
+    let payment_id = body["id"].as_str().unwrap().to_string();
+    let payment_uuid = Uuid::parse_str(&payment_id).unwrap();
+
+    let row: (Uuid,) = sqlx::query_as("SELECT merchant_id FROM payments WHERE id = $1")
+        .bind(payment_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0.to_string(), MERCHANT_ACTOR_ID);
+
+    let audit_rows: Vec<(String, String, String)> = sqlx::query_as(
+        r#"SELECT action, resource_type, resource_id FROM audit_records
+           WHERE resource_type = 'payment' AND resource_id = $1"#,
+    )
+    .bind(&payment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_rows.len(), 1);
+    assert_eq!(audit_rows[0].0, "payment.created");
+    assert_eq!(audit_rows[0].1, "payment");
+    assert_eq!(audit_rows[0].2, payment_id);
+
+    let event_rows: Vec<(String, String, String, i32)> = sqlx::query_as(
+        r#"SELECT event_type, aggregate_type, aggregate_id::text, version FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1"#,
+    )
+    .bind(payment_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(event_rows.len(), 1);
+    assert_eq!(event_rows[0].0, "payment.created");
+    assert_eq!(event_rows[0].1, "payment");
+    assert_eq!(event_rows[0].2, payment_id);
+    assert_eq!(event_rows[0].3, 1);
+}
+
+#[tokio::test]
+async fn exact_idempotent_replay_returns_200() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status1, body1) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 500,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(status1, axum::http::StatusCode::CREATED);
+    let payment_id = body1["id"].as_str().unwrap().to_string();
+
+    let payment_count_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM payments WHERE idempotency_key = $1")
+            .bind(&idem_key)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let audit_count_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_records WHERE resource_id = $1")
+            .bind(&payment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let event_count_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM domain_events WHERE aggregate_id::text = $1")
+            .bind(&payment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status2, body2) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 500,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(status2, axum::http::StatusCode::OK);
+    assert_eq!(body2["id"], payment_id);
+    assert_eq!(body2["amount_minor"], 500);
+
+    let payment_count_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM payments WHERE idempotency_key = $1")
+            .bind(&idem_key)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(payment_count_after, payment_count_before);
+
+    let audit_count_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_records WHERE resource_id = $1")
+            .bind(&payment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit_count_after, audit_count_before);
+
+    let event_count_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM domain_events WHERE aggregate_id::text = $1")
+            .bind(&payment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(event_count_after, event_count_before);
+}
+
+#[tokio::test]
+async fn same_key_different_metadata_returns_409() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (s1, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"ref": "A"}
+        })),
+    )
+    .await;
+    assert_eq!(s1, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (s2, _) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"ref": "B"}
+        })),
+    )
+    .await;
+    assert_eq!(s2, axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn same_key_different_amount_returns_409() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (s1, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(s1, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (s2, _) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 2000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(s2, axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn missing_idempotency_key_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        None,
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn amount_minor_zero_or_negative_returns_422() {
+    let pool = setup_db().await;
+
+    for amount in &[0i64, -1] {
+        let mut app = build_app(pool.clone()).await;
+        let (status, _) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            "/api/v1/payments",
+            &merchant_token(),
+            Some(&new_idempotency_key()),
+            Some(json!({
+                "amount_minor": amount,
+                "currency": "USD"
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "amount_minor={} should be rejected",
+            amount
+        );
+    }
+}
+
+#[tokio::test]
+async fn unsupported_currency_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "EUR"
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn unknown_body_field_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "amount": 10.00
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn metadata_as_array_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": [1, 2, 3]
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn metadata_scalar_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": "not-an-object"
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn oversized_metadata_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let large_value = "x".repeat(5000);
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"data": large_value}
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn administrator_create_payment_returns_403() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &admin_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn metadata_key_order_does_not_affect_replay() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (s1, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"a": 1, "b": 2}
+        })),
+    )
+    .await;
+    assert_eq!(s1, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (s2, _) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(serde_json::json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"b": 2, "a": 1}
+        })),
+    )
+    .await;
+    assert_eq!(s2, axum::http::StatusCode::OK);
+}

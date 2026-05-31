@@ -8,6 +8,22 @@ This context defines the business language for a simplified payment gateway so p
 A Payment is the core business record for one merchant charge request and its lifecycle outcome.
 _Avoid_: Transaction, payment transaction, payment request
 
+**Payment Metadata**:
+Payment Metadata is merchant-supplied creation context attached to a Payment for merchant reconciliation and lookup. It is not Payment lifecycle state and does not change payment processing outcome.
+_Avoid_: Payment notes, mutable payment details, processing state
+
+**Idempotency Key**:
+An Idempotency Key is a merchant-supplied value that identifies one create command so a repeated submission does not create a duplicate Payment or Refund.
+_Avoid_: Request ID, payment ID, retry token
+
+**Configured Currency**:
+Configured Currency is the single currency the gateway accepts for Payment and Refund amounts in MVP.
+_Avoid_: Merchant-selected currency, multi-currency amount
+
+**Payment Amount**:
+A Payment Amount is the value of a Payment expressed in minor units of the Configured Currency.
+_Avoid_: Decimal amount, display amount, converted amount
+
 **Payment Status**:
 Payment Status expresses where a Payment is in its lifecycle: pending, processing, successful, failed, or refunded.
 _Avoid_: Transaction status
@@ -27,6 +43,10 @@ _Avoid_: Refund state machine (as a replacement for status term)
 **Notification Delivery Record**:
 A Notification Delivery Record tracks delivery of one domain event to one destination and its outcome.
 _Avoid_: Webhook attempt log, notification job
+
+**Domain Event**:
+A Domain Event is an immutable fact that a meaningful Payment or Refund lifecycle change occurred. Domain Events may be used to create Notification Delivery Records, but they are not themselves delivery attempts.
+_Avoid_: Webhook, notification, audit record
 
 **Reconciliation**:
 Reconciliation is a record of one balance comparison run between expected and actual financial totals.
@@ -76,6 +96,10 @@ _Avoid_: System user, service account
 
 - "Transaction" was used interchangeably with "Payment" in planning docs; use **Payment** as the canonical term unless referring to external processor records in future scope.
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
+- "Payment metadata" in planning docs means **Payment Metadata**, not a separate Payment Request object or mutable lifecycle details. Payment Metadata is part of the create command identified by an **Idempotency Key**.
+- An **Idempotency Key** identifies a create command from the Merchant; it is not the Payment identifier and does not replace the Actor or Merchant Account identity.
+- **Configured Currency** is a gateway-level MVP constraint; Payments in any other currency are rejected rather than converted.
+- "Amount" in planning docs means **Payment Amount** in minor units; decimal or display-form money is not accepted at the command boundary.
 - MVP uses full refunds only; "partial refund" is future scope and must not be implied by "refunded".
 - MVP refund behavior is one full Refund per successful Payment; multiple or partial refunds are future scope.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
@@ -84,6 +108,7 @@ _Avoid_: System user, service account
 - Authentication failures may include unverified identity claims, but those claims do not establish an **Actor**.
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.
 - System-initiated work uses a **System Principal**, not an **Actor** or **Unknown Principal**.
+- Emitting a **Domain Event** means recording the immutable domain fact; creating a **Notification Delivery Record** for that event is separate notification pipeline work.
 
 ## Example dialogue
 
