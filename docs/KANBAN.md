@@ -10,7 +10,6 @@ No tickets currently assigned.
 
 ### Backlog
 
-- [MPG-005](#mpg-005-create-payment-request)
 - [MPG-006](#mpg-006-view-payment-details)
 - [MPG-007](#mpg-007-list-search-and-filter-payments)
 - [MPG-008](#mpg-008-process-payment-transaction)
@@ -41,6 +40,7 @@ No tickets currently assigned.
 - [MPG-002](#mpg-002-set-up-project-foundation)
 - [MPG-003](#mpg-003-implement-authentication-and-user-roles)
 - [MPG-004](#mpg-004-create-audit-logging)
+- [MPG-005](#mpg-005-create-payment-request)
 
 ---
 
