@@ -28,6 +28,10 @@ _Avoid_: Decimal amount, display amount, converted amount
 Payment Status expresses where a Payment is in its lifecycle: pending, processing, successful, failed, or refunded.
 _Avoid_: Transaction status
 
+**Payment Status History**:
+Payment Status History is the ordered record of Payment Statuses a Payment has reached during its lifecycle, including status changes caused by completed Refunds.
+_Avoid_: Transaction history, audit history
+
 **Refund**:
 A Refund is a reversal of value against one successful Payment.
 _Avoid_: Reversal transaction, chargeback
@@ -96,6 +100,7 @@ _Avoid_: System user, service account
 
 - "Transaction" was used interchangeably with "Payment" in planning docs; use **Payment** as the canonical term unless referring to external processor records in future scope.
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
+- "Transaction history" in planning docs means **Payment Status History** when discussing a Payment's lifecycle statuses.
 - "Payment metadata" in planning docs means **Payment Metadata**, not a separate Payment Request object or mutable lifecycle details. Payment Metadata is part of the create command identified by an **Idempotency Key**.
 - An **Idempotency Key** identifies a create command from the Merchant; it is not the Payment identifier and does not replace the Actor or Merchant Account identity.
 - **Configured Currency** is a gateway-level MVP constraint; Payments in any other currency are rejected rather than converted.

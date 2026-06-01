@@ -51,6 +51,56 @@ impl From<Payment> for PaymentResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentDetailResponse {
+    pub id: Uuid,
+    pub merchant_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: PaymentStatus,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub status_history: Vec<PaymentStatusHistoryEntry>,
+    pub refunds: Vec<PaymentRefundSummary>,
+    pub notification_delivery_records: Vec<PaymentNotificationDeliveryRecordResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentStatusHistoryEntry {
+    pub status: PaymentStatus,
+    pub source_event_type: String,
+    pub domain_event_id: Uuid,
+    pub occurred_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentRefundSummary {
+    pub id: Uuid,
+    pub payment_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentNotificationDeliveryRecordResponse {
+    pub id: Uuid,
+    pub domain_event_id: Uuid,
+    pub event_type: String,
+    pub destination_url: String,
+    pub status: String,
+    pub attempt_count: i32,
+    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub next_retry_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +179,92 @@ mod tests {
         let b = serde_json::json!({"b": 2, "a": 1});
         // serde_json::Value equality for objects is order-independent
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn payment_detail_response_includes_merchant_id_and_excludes_idempotency_key() {
+        let detail = PaymentDetailResponse {
+            id: Uuid::nil(),
+            merchant_id: Uuid::nil(),
+            amount_minor: 1000,
+            currency: "USD".into(),
+            status: PaymentStatus::Pending,
+            metadata: serde_json::json!({"foo": "bar"}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            status_history: vec![],
+            refunds: vec![],
+            notification_delivery_records: vec![],
+        };
+        let value = serde_json::to_value(detail).unwrap();
+        assert!(value.get("merchant_id").is_some());
+        assert!(value.get("idempotency_key").is_none());
+        assert_eq!(value["status_history"], serde_json::json!([]));
+        assert_eq!(value["refunds"], serde_json::json!([]));
+        assert_eq!(
+            value["notification_delivery_records"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn payment_status_history_entry_omits_details_when_none() {
+        let entry = PaymentStatusHistoryEntry {
+            status: PaymentStatus::Pending,
+            source_event_type: "payment.created".into(),
+            domain_event_id: Uuid::nil(),
+            occurred_at: Utc::now(),
+            details: None,
+        };
+        let value = serde_json::to_value(entry).unwrap();
+        assert!(value.get("details").is_none());
+    }
+
+    #[test]
+    fn payment_status_history_entry_includes_details_when_some() {
+        let entry = PaymentStatusHistoryEntry {
+            status: PaymentStatus::Failed,
+            source_event_type: "payment.failed".into(),
+            domain_event_id: Uuid::nil(),
+            occurred_at: Utc::now(),
+            details: Some(serde_json::json!({"failure_reason": "insufficient_funds"})),
+        };
+        let value = serde_json::to_value(entry).unwrap();
+        assert_eq!(value["details"]["failure_reason"], "insufficient_funds");
+    }
+
+    #[test]
+    fn payment_refund_summary_excludes_idempotency_key() {
+        let summary = PaymentRefundSummary {
+            id: Uuid::nil(),
+            payment_id: Uuid::nil(),
+            amount_minor: 1000,
+            currency: "USD".into(),
+            status: "completed".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let value = serde_json::to_value(summary).unwrap();
+        assert!(value.get("idempotency_key").is_none());
+        assert_eq!(value["status"], "completed");
+    }
+
+    #[test]
+    fn payment_notification_delivery_record_response_excludes_idempotency_key() {
+        let record = PaymentNotificationDeliveryRecordResponse {
+            id: Uuid::nil(),
+            domain_event_id: Uuid::nil(),
+            event_type: "payment.created".into(),
+            destination_url: "https://example.com/webhook".into(),
+            status: "pending".into(),
+            attempt_count: 0,
+            last_attempt_at: None,
+            next_retry_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let value = serde_json::to_value(record).unwrap();
+        assert!(value.get("idempotency_key").is_none());
+        assert_eq!(value["event_type"], "payment.created");
     }
 }

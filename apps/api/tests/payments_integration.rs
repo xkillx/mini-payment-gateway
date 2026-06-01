@@ -535,3 +535,350 @@ async fn metadata_key_order_does_not_affect_replay() {
     .await;
     assert_eq!(s2, axum::http::StatusCode::OK);
 }
+
+fn second_merchant_actor_id() -> String {
+    new_uuid_v7().to_string()
+}
+
+fn second_merchant_token(actor_id: &str) -> String {
+    make_token(TestClaims {
+        sub: actor_id.into(),
+        role: "merchant".into(),
+        merchant_id: Some(actor_id.into()),
+        exp: 9999999999,
+    })
+}
+
+async fn insert_second_merchant_actor(pool: &PgPool, actor_id: &str) {
+    let id = Uuid::parse_str(actor_id).unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO actors (id, name, email, role, is_active, merchant_id)
+        VALUES ($1, $2, $3, 'merchant', true, $4)
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
+            role = EXCLUDED.role,
+            is_active = EXCLUDED.is_active,
+            merchant_id = EXCLUDED.merchant_id
+        "#,
+    )
+    .bind(id)
+    .bind(format!("Merchant {actor_id}"))
+    .bind(format!("merchant-{actor_id}@example.com"))
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn merchant_gets_own_payment_detail() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (create_status, create_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1500,
+            "currency": "USD",
+            "metadata": {"order_ref": "ORD-1"}
+        })),
+    )
+    .await;
+    assert_eq!(create_status, axum::http::StatusCode::CREATED);
+    let payment_id = create_body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    assert_eq!(body["id"], payment_id);
+    assert_eq!(body["merchant_id"], MERCHANT_ACTOR_ID);
+    assert_eq!(body["amount_minor"], 1500);
+    assert_eq!(body["currency"], "USD");
+    assert_eq!(body["status"], "pending");
+    assert_eq!(body["metadata"]["order_ref"], "ORD-1");
+    assert!(body["idempotency_key"].is_null());
+
+    let history = body["status_history"].as_array().unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0]["status"], "pending");
+    assert_eq!(history[0]["source_event_type"], "payment.created");
+    assert_eq!(history[0]["domain_event_id"].as_str().unwrap().len(), 36);
+    assert!(history[0]["occurred_at"].as_str().is_some());
+
+    assert_eq!(body["refunds"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        body["notification_delivery_records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn administrator_gets_any_payment_detail() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (create_status, create_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 2000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(create_status, axum::http::StatusCode::CREATED);
+    let payment_id = create_body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["id"], payment_id);
+    assert_eq!(body["merchant_id"], MERCHANT_ACTOR_ID);
+}
+
+#[tokio::test]
+async fn missing_payment_returns_404_for_merchant() {
+    let pool = setup_db().await;
+    let missing_id = new_uuid_v7();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{missing_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn missing_payment_returns_404_for_administrator() {
+    let pool = setup_db().await;
+    let missing_id = new_uuid_v7();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{missing_id}"),
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn cross_merchant_payment_returns_404() {
+    let pool = setup_db().await;
+    let other_actor_id = second_merchant_actor_id();
+    insert_second_merchant_actor(&pool, &other_actor_id).await;
+
+    let idem_key = new_idempotency_key();
+    let other_token = second_merchant_token(&other_actor_id);
+
+    let mut app = build_app(pool.clone()).await;
+    let (create_status, create_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &other_token,
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 3000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(create_status, axum::http::StatusCode::CREATED);
+    let payment_id = create_body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn detail_includes_refunds_refunded_history_and_notifications() {
+    let pool = setup_db().await;
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (create_status, create_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 4000,
+            "currency": "USD",
+            "metadata": {"order_ref": "ORD-DETAIL"}
+        })),
+    )
+    .await;
+    assert_eq!(create_status, axum::http::StatusCode::CREATED);
+    let payment_id = create_body["id"].as_str().unwrap().to_string();
+    let payment_uuid = Uuid::parse_str(&payment_id).unwrap();
+
+    let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+    let refund_id = new_uuid_v7();
+    let refund_idem = format!("refund-idem-{}", new_uuid_v7());
+    let now = chrono::Utc::now();
+    sqlx::query(
+        r#"
+        INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7, $7)
+        "#,
+    )
+    .bind(refund_id)
+    .bind(payment_uuid)
+    .bind(merchant_uuid)
+    .bind(4000i64)
+    .bind("USD")
+    .bind(&refund_idem)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let payment_event_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM domain_events WHERE aggregate_type = 'payment' AND aggregate_id = $1 LIMIT 1")
+            .bind(payment_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let refund_completed_event_id = new_uuid_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, 'refund.completed', 'refund', $2, $3, 1, $4)
+        "#,
+    )
+    .bind(refund_completed_event_id)
+    .bind(refund_id)
+    .bind(serde_json::json!({"refund_id": refund_id.to_string(), "payment_id": payment_id}))
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let notif_id_for_payment = new_uuid_v7();
+    let notif_id_for_refund = new_uuid_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO notification_delivery_records (id, domain_event_id, destination_url, status, attempt_count, last_attempt_at, next_retry_at, created_at, updated_at)
+        VALUES ($1, $2, 'https://merchant.example/webhook', 'pending', 0, NULL, NULL, $3, $3)
+        "#,
+    )
+    .bind(notif_id_for_payment)
+    .bind(payment_event_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO notification_delivery_records (id, domain_event_id, destination_url, status, attempt_count, last_attempt_at, next_retry_at, created_at, updated_at)
+        VALUES ($1, $2, 'https://merchant.example/webhook', 'pending', 0, NULL, NULL, $3, $3)
+        "#,
+    )
+    .bind(notif_id_for_refund)
+    .bind(refund_completed_event_id)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    let refunds = body["refunds"].as_array().unwrap();
+    assert_eq!(refunds.len(), 1);
+    assert_eq!(refunds[0]["id"], refund_id.to_string());
+    assert_eq!(refunds[0]["payment_id"], payment_id);
+    assert_eq!(refunds[0]["amount_minor"], 4000);
+    assert_eq!(refunds[0]["currency"], "USD");
+    assert_eq!(refunds[0]["status"], "completed");
+    assert!(refunds[0]["idempotency_key"].is_null());
+
+    let history = body["status_history"].as_array().unwrap();
+    let statuses: Vec<&str> = history
+        .iter()
+        .map(|e| e["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(statuses, vec!["pending", "refunded"]);
+    let sources: Vec<&str> = history
+        .iter()
+        .map(|e| e["source_event_type"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, vec!["payment.created", "refund.completed"]);
+
+    let notifs = body["notification_delivery_records"].as_array().unwrap();
+    assert_eq!(notifs.len(), 2);
+    let event_types: Vec<&str> = notifs
+        .iter()
+        .map(|n| n["event_type"].as_str().unwrap())
+        .collect();
+    assert!(event_types.contains(&"payment.created"));
+    assert!(event_types.contains(&"refund.completed"));
+    for n in notifs {
+        assert!(n["idempotency_key"].is_null());
+        assert_eq!(n["destination_url"], "https://merchant.example/webhook");
+        assert_eq!(n["status"], "pending");
+    }
+}

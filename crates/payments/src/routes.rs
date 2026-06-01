@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json, Router};
@@ -6,11 +6,13 @@ use serde::Deserialize;
 use shared_auth::Actor;
 use shared_http::error::AppError;
 use sqlx::PgPool;
+use uuid::Uuid;
 use validator::ValidationErrors;
 
 use crate::models::PaymentResponse;
 use crate::service::{
-    create_payment, CreatePaymentCommand, CreatePaymentError, CreatePaymentOutcome,
+    create_payment, get_payment_detail, CreatePaymentCommand, CreatePaymentError,
+    CreatePaymentOutcome, GetPaymentDetailError,
 };
 
 #[derive(Clone)]
@@ -47,8 +49,23 @@ async fn list_payments() -> impl axum::response::IntoResponse {
     AppError::NotImplemented("payments.list")
 }
 
-async fn get_payment() -> impl axum::response::IntoResponse {
-    AppError::NotImplemented("payments.get")
+async fn get_payment(
+    State(state): State<PaymentRouteState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    let viewer_merchant_id = actor.merchant_id();
+
+    match get_payment_detail(&state.pool, id, viewer_merchant_id).await {
+        Ok(detail) => Json(detail).into_response(),
+        Err(GetPaymentDetailError::NotFound) => {
+            AppError::NotFound("Payment not found".into()).into_response()
+        }
+        Err(GetPaymentDetailError::Database(e)) => {
+            tracing::error!(payment_id = %id, error = %e, "Database error getting payment");
+            AppError::Internal("Failed to get payment".into()).into_response()
+        }
+    }
 }
 
 fn validation_error(field: &'static str, code: &'static str, message: &'static str) -> AppError {

@@ -159,3 +159,10 @@ pub async fn find_payment_by_merchant_and_idempotency_key_in_tx(
     .fetch_optional(tx.as_mut())
     .await
 }
+
+pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Payment>, sqlx::Error> {
+    sqlx::query_as::<_, Payment>("SELECT * FROM payments WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}

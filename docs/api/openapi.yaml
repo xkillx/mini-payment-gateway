@@ -89,6 +89,12 @@ paths:
     get:
       operationId: getPayment
       summary: Get a payment by ID (Merchant or Administrator)
+      description: |
+        Returns the full Payment Detail for a single Payment, including Payment Status History,
+        related Refund summaries, and related Notification Delivery Records.
+
+        Merchants may only view Payments owned by their own Merchant Account; access to any
+        other Payment returns 404. Administrators may view any Payment.
       security:
         - bearerAuth: []
       parameters:
@@ -99,12 +105,18 @@ paths:
             type: string
             format: uuid
       responses:
+        "200":
+          description: Payment detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentDetailResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/refunds:
     get:
@@ -505,6 +517,204 @@ components:
         - failed
         - refunded
       description: Current status of the Payment lifecycle
+
+    RefundStatus:
+      type: string
+      enum:
+        - pending
+        - processing
+        - completed
+        - failed
+      description: Current status of the Refund lifecycle
+
+    NotificationStatus:
+      type: string
+      enum:
+        - pending
+        - processing
+        - delivered
+        - failed
+      description: Current status of a Notification Delivery Record
+
+    PaymentStatusHistoryEntry:
+      type: object
+      required:
+        - status
+        - source_event_type
+        - domain_event_id
+        - occurred_at
+      properties:
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        source_event_type:
+          type: string
+          description: |
+            Domain Event that produced this Payment Status History entry (e.g. `payment.created`,
+            `payment.processing`, `payment.successful`, `payment.failed`, `payment.refunded`,
+            or a linked `refund.completed`).
+        domain_event_id:
+          type: string
+          format: uuid
+          description: Identifier of the source Domain Event
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the source Domain Event was recorded
+        details:
+          type: object
+          nullable: true
+          description: |
+            Optional event-specific context. For `payment.failed` events this includes a
+            `failure_reason` field when present in the event payload.
+
+    PaymentRefundSummary:
+      type: object
+      required:
+        - id
+        - payment_id
+        - amount_minor
+        - currency
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Refund ID
+        payment_id:
+          type: string
+          format: uuid
+          description: Owning Payment ID
+        amount_minor:
+          type: integer
+          description: Refund amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/RefundStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: When the Refund was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Refund was last updated
+
+    PaymentNotificationDeliveryRecord:
+      type: object
+      required:
+        - id
+        - domain_event_id
+        - event_type
+        - destination_url
+        - status
+        - attempt_count
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Notification Delivery Record ID
+        domain_event_id:
+          type: string
+          format: uuid
+          description: Domain Event this record delivers
+        event_type:
+          type: string
+          description: Type of the related Domain Event (e.g. `payment.created`, `refund.completed`)
+        destination_url:
+          type: string
+          format: uri
+          description: Webhook destination URL
+        status:
+          $ref: "#/components/schemas/NotificationStatus"
+        attempt_count:
+          type: integer
+          description: Number of delivery attempts made so far
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When delivery was last attempted
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the next retry is scheduled (null when not pending)
+        created_at:
+          type: string
+          format: date-time
+          description: When the record was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the record was last updated
+
+    PaymentDetailResponse:
+      type: object
+      required:
+        - id
+        - merchant_id
+        - amount_minor
+        - currency
+        - status
+        - metadata
+        - created_at
+        - updated_at
+        - status_history
+        - refunds
+        - notification_delivery_records
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Payment ID
+        merchant_id:
+          type: string
+          format: uuid
+          description: Owning Merchant Account ID
+        amount_minor:
+          type: integer
+          description: Payment Amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        metadata:
+          type: object
+          description: Payment Metadata attached at creation
+        created_at:
+          type: string
+          format: date-time
+          description: When the Payment was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Payment was last updated
+        status_history:
+          type: array
+          description: |
+            Ordered Payment Status History derived from Domain Events.
+            Entries are ordered oldest to newest and include status changes
+            caused by completed Refunds.
+          items:
+            $ref: "#/components/schemas/PaymentStatusHistoryEntry"
+        refunds:
+          type: array
+          description: Related Refund summaries for this Payment
+          items:
+            $ref: "#/components/schemas/PaymentRefundSummary"
+        notification_delivery_records:
+          type: array
+          description: |
+            Notification Delivery Records related to this Payment and to its linked Refund events.
+          items:
+            $ref: "#/components/schemas/PaymentNotificationDeliveryRecord"
 
     AuditRecord:
       type: object
