@@ -1,4 +1,4 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json, Router};
@@ -9,10 +9,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use validator::ValidationErrors;
 
-use crate::models::PaymentResponse;
+use crate::models::{parse_payment_status, PaymentListFilter, PaymentResponse, PaymentStatus};
 use crate::service::{
-    create_payment, get_payment_detail, CreatePaymentCommand, CreatePaymentError,
-    CreatePaymentOutcome, GetPaymentDetailError,
+    create_payment, get_payment_detail, list_payments as list_payments_service,
+    CreatePaymentCommand, CreatePaymentError, CreatePaymentOutcome, GetPaymentDetailError,
+    ListPaymentsError,
 };
 
 #[derive(Clone)]
@@ -45,8 +46,161 @@ pub fn routes(pool: PgPool, payment_currency: String) -> Router {
         .with_state(state)
 }
 
-async fn list_payments() -> impl axum::response::IntoResponse {
-    AppError::NotImplemented("payments.list")
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListPaymentsQuery {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    search: Option<String>,
+    #[serde(default)]
+    merchant_id: Option<String>,
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    offset: Option<String>,
+}
+
+const SEARCH_MAX_LEN: usize = 128;
+const DEFAULT_LIMIT: i64 = 50;
+const MAX_LIMIT: i64 = 200;
+
+async fn list_payments(
+    State(state): State<PaymentRouteState>,
+    Extension(actor): Extension<Actor>,
+    Query(query): Query<ListPaymentsQuery>,
+) -> Response {
+    let limit = match query.limit.as_deref() {
+        None => DEFAULT_LIMIT,
+        Some(raw) => match raw.parse::<i64>() {
+            Ok(value) if (1..=MAX_LIMIT).contains(&value) => value,
+            Ok(value) if value < 1 => {
+                return validation_error(
+                    "limit",
+                    "invalid",
+                    "limit must be greater than or equal to 1",
+                )
+                .into_response();
+            }
+            Ok(value) if value > MAX_LIMIT => {
+                return validation_error(
+                    "limit",
+                    "invalid",
+                    "limit must be less than or equal to 200",
+                )
+                .into_response();
+            }
+            _ => {
+                return validation_error_string(
+                    "limit",
+                    "invalid",
+                    format!("limit must be an integer between 1 and {MAX_LIMIT}"),
+                )
+                .into_response();
+            }
+        },
+    };
+
+    let offset = match query.offset.as_deref() {
+        None => 0,
+        Some(raw) => match raw.parse::<i64>() {
+            Ok(value) if value >= 0 => value,
+            Ok(_) => {
+                return validation_error(
+                    "offset",
+                    "invalid",
+                    "offset must be greater than or equal to 0",
+                )
+                .into_response();
+            }
+            _ => {
+                return validation_error_string(
+                    "offset",
+                    "invalid",
+                    "offset must be a non-negative integer".to_string(),
+                )
+                .into_response();
+            }
+        },
+    };
+
+    let status: Option<PaymentStatus> = match query.status.as_deref() {
+        None => None,
+        Some(raw) => match parse_payment_status(raw) {
+            Some(s) => Some(s),
+            None => {
+                return validation_error(
+                    "status",
+                    "invalid",
+                    "status must be one of pending, processing, successful, failed, refunded",
+                )
+                .into_response();
+            }
+        },
+    };
+
+    let search = match query.search.as_deref() {
+        None => None,
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                if trimmed.chars().count() > SEARCH_MAX_LEN {
+                    return validation_error_string(
+                        "search",
+                        "invalid",
+                        format!("search must be at most {SEARCH_MAX_LEN} characters"),
+                    )
+                    .into_response();
+                }
+                Some(trimmed.to_string())
+            }
+        }
+    };
+
+    let search_id = search.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+
+    if actor.is_merchant() && query.merchant_id.is_some() {
+        return AppError::Forbidden("Merchants cannot filter payments by merchant_id".into())
+            .into_response();
+    }
+
+    let merchant_id: Option<Uuid> = if actor.is_merchant() {
+        actor.merchant_id()
+    } else {
+        match query.merchant_id.as_deref() {
+            None => None,
+            Some(raw) => match Uuid::parse_str(raw) {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return validation_error(
+                        "merchant_id",
+                        "invalid",
+                        "merchant_id must be a valid UUID",
+                    )
+                    .into_response();
+                }
+            },
+        }
+    };
+
+    let filter = PaymentListFilter {
+        merchant_id,
+        status,
+        search,
+        search_id,
+        limit,
+        offset,
+    };
+
+    match list_payments_service(&state.pool, filter).await {
+        Ok(response) => Json(response).into_response(),
+        Err(ListPaymentsError::Database(e)) => {
+            tracing::error!(error = %e, "Database error listing payments");
+            AppError::Internal("Failed to list payments".into()).into_response()
+        }
+    }
 }
 
 async fn get_payment(

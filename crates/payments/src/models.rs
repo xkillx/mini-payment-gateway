@@ -101,6 +101,61 @@ pub struct PaymentNotificationDeliveryRecordResponse {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentListItemResponse {
+    pub id: Uuid,
+    pub merchant_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: PaymentStatus,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<Payment> for PaymentListItemResponse {
+    fn from(p: Payment) -> Self {
+        Self {
+            id: p.id,
+            merchant_id: p.merchant_id,
+            amount_minor: p.amount_minor,
+            currency: p.currency,
+            status: p.status,
+            metadata: p.metadata,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentListResponse {
+    pub items: Vec<PaymentListItemResponse>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PaymentListFilter {
+    pub merchant_id: Option<Uuid>,
+    pub status: Option<PaymentStatus>,
+    pub search: Option<String>,
+    pub search_id: Option<Uuid>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+pub fn parse_payment_status(value: &str) -> Option<PaymentStatus> {
+    match value {
+        "pending" => Some(PaymentStatus::Pending),
+        "processing" => Some(PaymentStatus::Processing),
+        "successful" => Some(PaymentStatus::Successful),
+        "failed" => Some(PaymentStatus::Failed),
+        "refunded" => Some(PaymentStatus::Refunded),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +321,64 @@ mod tests {
         let value = serde_json::to_value(record).unwrap();
         assert!(value.get("idempotency_key").is_none());
         assert_eq!(value["event_type"], "payment.created");
+    }
+
+    #[test]
+    fn payment_list_item_response_includes_merchant_id_and_excludes_idempotency_key() {
+        let payment = Payment {
+            id: Uuid::nil(),
+            merchant_id: Uuid::nil(),
+            amount_minor: 1000,
+            currency: "USD".into(),
+            status: PaymentStatus::Pending,
+            idempotency_key: "test-key".into(),
+            metadata: serde_json::json!({"merchant_reference": "ORD-123"}),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let item: PaymentListItemResponse = payment.into();
+        let value = serde_json::to_value(item).unwrap();
+        assert!(value.get("merchant_id").is_some());
+        assert!(value.get("idempotency_key").is_none());
+        assert_eq!(value["amount_minor"], 1000);
+        assert_eq!(value["status"], "pending");
+        assert_eq!(value["metadata"]["merchant_reference"], "ORD-123");
+    }
+
+    #[test]
+    fn payment_list_response_serializes_items_limit_offset() {
+        let response = PaymentListResponse {
+            items: vec![],
+            limit: 50,
+            offset: 0,
+        };
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["items"], serde_json::json!([]));
+        assert_eq!(value["limit"], 50);
+        assert_eq!(value["offset"], 0);
+    }
+
+    #[test]
+    fn parse_payment_status_matches_lowercase_values() {
+        assert_eq!(
+            parse_payment_status("pending"),
+            Some(PaymentStatus::Pending)
+        );
+        assert_eq!(
+            parse_payment_status("processing"),
+            Some(PaymentStatus::Processing)
+        );
+        assert_eq!(
+            parse_payment_status("successful"),
+            Some(PaymentStatus::Successful)
+        );
+        assert_eq!(parse_payment_status("failed"), Some(PaymentStatus::Failed));
+        assert_eq!(
+            parse_payment_status("refunded"),
+            Some(PaymentStatus::Refunded)
+        );
+        assert_eq!(parse_payment_status("PENDING"), None);
+        assert_eq!(parse_payment_status(""), None);
+        assert_eq!(parse_payment_status("paid"), None);
     }
 }

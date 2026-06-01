@@ -882,3 +882,642 @@ async fn detail_includes_refunds_refunded_history_and_notifications() {
         assert_eq!(n["status"], "pending");
     }
 }
+
+#[tokio::test]
+async fn merchant_list_defaults_returns_only_own_payments() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (own_status, own_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"merchant_reference": "OWN-REF-1"}
+        })),
+    )
+    .await;
+    assert_eq!(own_status, axum::http::StatusCode::CREATED);
+    let own_payment_id = own_body["id"].as_str().unwrap().to_string();
+
+    let other_actor_id = second_merchant_actor_id();
+    insert_second_merchant_actor(&pool, &other_actor_id).await;
+    let other_token = second_merchant_token(&other_actor_id);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (other_status, other_body) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &other_token,
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 2000,
+            "currency": "USD"
+        })),
+    )
+    .await;
+    assert_eq!(other_status, axum::http::StatusCode::CREATED);
+    let other_payment_id = other_body["id"].as_str().unwrap().to_string();
+
+    let mut app3 = build_app(pool.clone()).await;
+    let (list_status, list_body) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        "/api/v1/payments",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+
+    assert_eq!(list_body["limit"], 50);
+    assert_eq!(list_body["offset"], 0);
+    let items = list_body["items"].as_array().unwrap();
+    let returned_ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(returned_ids.contains(&own_payment_id.as_str()));
+    assert!(!returned_ids.contains(&other_payment_id.as_str()));
+    for item in items {
+        assert_eq!(item["merchant_id"], MERCHANT_ACTOR_ID);
+        assert!(item.get("idempotency_key").is_none());
+    }
+}
+
+#[tokio::test]
+async fn administrator_list_returns_payments_across_merchants() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (own_status, own_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 1000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(own_status, axum::http::StatusCode::CREATED);
+    let own_payment_id = own_body["id"].as_str().unwrap().to_string();
+
+    let other_actor_id = second_merchant_actor_id();
+    insert_second_merchant_actor(&pool, &other_actor_id).await;
+    let other_token = second_merchant_token(&other_actor_id);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (other_status, other_body) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &other_token,
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 2000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(other_status, axum::http::StatusCode::CREATED);
+    let other_payment_id = other_body["id"].as_str().unwrap().to_string();
+
+    let mut app3 = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        "/api/v1/payments",
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    let items = body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&own_payment_id.as_str()));
+    assert!(ids.contains(&other_payment_id.as_str()));
+}
+
+#[tokio::test]
+async fn administrator_list_filters_by_merchant_id() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (own_status, own_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 1000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(own_status, axum::http::StatusCode::CREATED);
+    let own_payment_id = own_body["id"].as_str().unwrap().to_string();
+
+    let other_actor_id = second_merchant_actor_id();
+    insert_second_merchant_actor(&pool, &other_actor_id).await;
+    let other_token = second_merchant_token(&other_actor_id);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (other_status, other_body) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &other_token,
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 2000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(other_status, axum::http::StatusCode::CREATED);
+    let other_payment_id = other_body["id"].as_str().unwrap().to_string();
+
+    let mut app3 = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?merchant_id={MERCHANT_ACTOR_ID}");
+    let (status, body) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        &uri,
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&own_payment_id.as_str()));
+    assert!(!ids.contains(&other_payment_id.as_str()));
+    for item in items {
+        assert_eq!(item["merchant_id"], MERCHANT_ACTOR_ID);
+    }
+}
+
+#[tokio::test]
+async fn merchant_list_with_merchant_id_query_returns_403() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?merchant_id={MERCHANT_ACTOR_ID}");
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let uri2 = "/api/v1/payments?merchant_id=not-a-uuid";
+    let (status2, _) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        uri2,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status2, axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn list_pagination_orders_newest_first_and_respects_limit_offset() {
+    let pool = setup_db().await;
+
+    let base = chrono::Utc::now() + chrono::Duration::seconds(3600);
+    let mut created_ids: Vec<String> = Vec::new();
+    for i in 0..3 {
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            "/api/v1/payments",
+            &merchant_token(),
+            Some(&new_idempotency_key()),
+            Some(json!({
+                "amount_minor": 1000 + i as i64,
+                "currency": "USD"
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CREATED);
+        let id = body["id"].as_str().unwrap().to_string();
+        created_ids.push(id.clone());
+
+        let created_at = base + chrono::Duration::milliseconds(i as i64 * 10);
+        let id_uuid = Uuid::parse_str(&id).unwrap();
+        sqlx::query("UPDATE payments SET created_at = $1, updated_at = $1 WHERE id = $2")
+            .bind(created_at)
+            .bind(id_uuid)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let mut app = build_app(pool.clone()).await;
+    let uri = "/api/v1/payments?limit=1&offset=1";
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["limit"], 1);
+    assert_eq!(body["offset"], 1);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], created_ids[1]);
+}
+
+#[tokio::test]
+async fn list_status_filter_returns_only_matching_status() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status1, body1) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 1000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(status1, axum::http::StatusCode::CREATED);
+    let pending_id = body1["id"].as_str().unwrap().to_string();
+
+    let (status2, body2) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 2000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(status2, axum::http::StatusCode::CREATED);
+    let successful_id = body2["id"].as_str().unwrap().to_string();
+    let successful_uuid = Uuid::parse_str(&successful_id).unwrap();
+
+    sqlx::query("UPDATE payments SET status = 'successful', updated_at = NOW() WHERE id = $1")
+        .bind(successful_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (list_status, list_body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        "/api/v1/payments?status=successful",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&successful_id.as_str()));
+    assert!(!ids.contains(&pending_id.as_str()));
+    for item in items {
+        assert_eq!(item["status"], "successful");
+    }
+}
+
+#[tokio::test]
+async fn list_search_by_exact_payment_id_returns_that_payment() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"amount_minor": 1000, "currency": "USD"})),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let target_id = body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?search={target_id}");
+    let (list_status, list_body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], target_id);
+}
+
+#[tokio::test]
+async fn list_search_by_case_insensitive_merchant_reference() {
+    let pool = setup_db().await;
+
+    let unique = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext))
+        .to_string()
+        .replace('-', "");
+    let upper_ref = format!("ORD-{unique}").to_uppercase();
+    let lower_search = format!("ord-{unique}").to_lowercase();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status1, body1) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"merchant_reference": upper_ref}
+        })),
+    )
+    .await;
+    assert_eq!(status1, axum::http::StatusCode::CREATED);
+    let target_id = body1["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status2, _) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 2000,
+            "currency": "USD",
+            "metadata": {"merchant_reference": "OTHER-REF"}
+        })),
+    )
+    .await;
+    assert_eq!(status2, axum::http::StatusCode::CREATED);
+
+    let mut app3 = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?search={lower_search}");
+    let (list_status, list_body) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        &uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&target_id.as_str()));
+}
+
+#[tokio::test]
+async fn list_search_with_uuid_text_matches_merchant_reference() {
+    let pool = setup_db().await;
+
+    let uuid_like_ref = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {"merchant_reference": uuid_like_ref}
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let target_id = body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?search={uuid_like_ref}");
+    let (list_status, list_body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&target_id.as_str()));
+}
+
+#[tokio::test]
+async fn list_search_ignores_idempotency_key_and_arbitrary_metadata() {
+    let pool = setup_db().await;
+
+    let idem_key = new_idempotency_key();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {
+                "merchant_reference": "REAL-REF-001",
+                "order_ref": "IDEMKEY123",
+                "tag": "value"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let uri_idem = format!("/api/v1/payments?search={idem_key}");
+    let (status_idem, body_idem) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &uri_idem,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status_idem, axum::http::StatusCode::OK);
+    assert_eq!(body_idem["items"].as_array().unwrap().len(), 0);
+
+    let mut app3 = build_app(pool.clone()).await;
+    let uri_arb = "/api/v1/payments?search=IDEMKEY123";
+    let (status_arb, body_arb) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        uri_arb,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status_arb, axum::http::StatusCode::OK);
+    assert_eq!(body_arb["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn list_search_ignores_non_string_merchant_reference() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "amount_minor": 1000,
+            "currency": "USD",
+            "metadata": {
+                "merchant_reference": 12345,
+                "real_ref": "ABCXYZ"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let target_id = body["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let uri = "/api/v1/payments?search=12345";
+    let (list_status, list_body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    let ids: Vec<&str> = items.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(!ids.contains(&target_id.as_str()));
+
+    let mut app3 = build_app(pool.clone()).await;
+    let uri2 = "/api/v1/payments?search=ABCXYZ";
+    let (list_status2, list_body2) = send_request(
+        &mut app3,
+        axum::http::Method::GET,
+        uri2,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status2, axum::http::StatusCode::OK);
+    let items2 = list_body2["items"].as_array().unwrap();
+    let ids2: Vec<&str> = items2.iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(!ids2.contains(&target_id.as_str()));
+}
+
+#[tokio::test]
+async fn list_invalid_pagination_returns_422() {
+    let pool = setup_db().await;
+
+    for (uri, label) in [
+        ("/api/v1/payments?limit=0", "limit=0"),
+        ("/api/v1/payments?limit=201", "limit=201"),
+        ("/api/v1/payments?offset=-1", "offset=-1"),
+        ("/api/v1/payments?limit=abc", "limit=abc"),
+    ] {
+        let mut app = build_app(pool.clone()).await;
+        let (status, _) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            uri,
+            &merchant_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "{label} should be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_invalid_status_returns_422() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/payments?status=paid",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn list_search_too_long_returns_422() {
+    let pool = setup_db().await;
+
+    let too_long = "a".repeat(129);
+    let mut app = build_app(pool.clone()).await;
+    let uri = format!("/api/v1/payments?search={too_long}");
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &uri,
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn administrator_list_with_malformed_merchant_id_returns_422() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/payments?merchant_id=not-a-uuid",
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}

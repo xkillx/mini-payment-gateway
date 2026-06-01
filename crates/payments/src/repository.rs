@@ -1,7 +1,7 @@
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use uuid::Uuid;
 
-use crate::models::Payment;
+use crate::models::{Payment, PaymentListFilter};
 
 pub trait PaymentRepository: Send + Sync {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Payment>, sqlx::Error>;
@@ -17,6 +17,7 @@ pub trait PaymentRepository: Send + Sync {
         &self,
         payment: &Payment,
     ) -> Result<Option<Payment>, sqlx::Error>;
+    async fn list(&self, filter: &PaymentListFilter) -> Result<Vec<Payment>, sqlx::Error>;
 }
 
 pub struct PostgresPaymentRepository {
@@ -119,6 +120,64 @@ impl PaymentRepository for PostgresPaymentRepository {
         .fetch_optional(&self.pool)
         .await
     }
+
+    async fn list(&self, filter: &PaymentListFilter) -> Result<Vec<Payment>, sqlx::Error> {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM payments WHERE 1=1");
+
+        if let Some(merchant_id) = filter.merchant_id {
+            qb.push(" AND merchant_id = ").push_bind(merchant_id);
+        }
+
+        if let Some(status) = &filter.status {
+            qb.push(" AND status = ").push_bind(status.clone());
+        }
+
+        if filter.search.is_some() || filter.search_id.is_some() {
+            qb.push(" AND (");
+            let mut branch = false;
+
+            if let Some(needle) = &filter.search {
+                let pattern = escape_like_pattern(needle);
+                let like_pattern = format!("%{}%", pattern);
+                qb.push("(");
+                qb.push("jsonb_typeof(metadata->'merchant_reference') = 'string'");
+                qb.push(" AND metadata->>'merchant_reference' ILIKE ");
+                qb.push_bind(like_pattern);
+                qb.push(" ESCAPE '\\'");
+                qb.push(")");
+                branch = true;
+            }
+
+            if let Some(id) = filter.search_id {
+                if branch {
+                    qb.push(" OR ");
+                }
+                qb.push("id = ").push_bind(id);
+            }
+
+            qb.push(")");
+        }
+
+        qb.push(" ORDER BY created_at DESC, id DESC LIMIT ")
+            .push_bind(filter.limit);
+        qb.push(" OFFSET ").push_bind(filter.offset);
+
+        qb.build_query_as::<Payment>().fetch_all(&self.pool).await
+    }
+}
+
+fn escape_like_pattern(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 pub async fn insert_payment_in_tx(

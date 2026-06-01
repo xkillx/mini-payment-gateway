@@ -4,10 +4,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    Payment, PaymentDetailResponse, PaymentNotificationDeliveryRecordResponse,
-    PaymentRefundSummary, PaymentStatus, PaymentStatusHistoryEntry,
+    Payment, PaymentDetailResponse, PaymentListFilter, PaymentListItemResponse,
+    PaymentListResponse, PaymentNotificationDeliveryRecordResponse, PaymentRefundSummary,
+    PaymentStatus, PaymentStatusHistoryEntry,
 };
-use crate::repository;
+use crate::repository::{self, PaymentRepository, PostgresPaymentRepository};
 use audit::models::{actions, ActorType, NewAuditRecord};
 use audit::service::record_required_in_tx;
 use audit::service::AuditError;
@@ -309,6 +310,36 @@ pub async fn get_payment_detail(
                 updated_at: n.updated_at,
             })
             .collect(),
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ListPaymentsError {
+    #[error("Database error: {0}")]
+    Database(String),
+}
+
+impl From<sqlx::Error> for ListPaymentsError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+pub async fn list_payments(
+    pool: &PgPool,
+    filter: PaymentListFilter,
+) -> Result<PaymentListResponse, ListPaymentsError> {
+    let repo = PostgresPaymentRepository::new(pool.clone());
+    let rows = repo.list(&filter).await?;
+    let limit = filter.limit;
+    let offset = filter.offset;
+    Ok(PaymentListResponse {
+        items: rows
+            .into_iter()
+            .map(PaymentListItemResponse::from)
+            .collect(),
+        limit,
+        offset,
     })
 }
 

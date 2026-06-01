@@ -12,6 +12,10 @@ _Avoid_: Transaction, payment transaction, payment request
 Payment Metadata is merchant-supplied creation context attached to a Payment for merchant reconciliation and lookup. It is not Payment lifecycle state and does not change payment processing outcome.
 _Avoid_: Payment notes, mutable payment details, processing state
 
+**Merchant Reference**:
+A Merchant Reference is a merchant-supplied lookup value that connects a Payment to the merchant's own records. It is not the gateway Payment identifier and does not identify the create command.
+_Avoid_: Payment ID, Idempotency Key, transaction reference
+
 **Idempotency Key**:
 An Idempotency Key is a merchant-supplied value that identifies one create command so a repeated submission does not create a duplicate Payment or Refund.
 _Avoid_: Request ID, payment ID, retry token
@@ -114,6 +118,8 @@ _Avoid_: System user, service account
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.
 - System-initiated work uses a **System Principal**, not an **Actor** or **Unknown Principal**.
 - Emitting a **Domain Event** means recording the immutable domain fact; creating a **Notification Delivery Record** for that event is separate notification pipeline work.
+- "Merchant reference" in planning docs means **Merchant Reference**, not the gateway Payment identifier, Idempotency Key, or arbitrary Payment Metadata.
+- "Payment identifier" in list/search planning means the Payment ID, not the **Idempotency Key** used to identify a create command.
 
 ## Example dialogue
 

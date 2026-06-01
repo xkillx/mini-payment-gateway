@@ -221,7 +221,7 @@ async fn merchant_on_admin_route_returns_403() {
 }
 
 #[tokio::test]
-async fn merchant_get_payments_reaches_handler_501() {
+async fn merchant_get_payments_reaches_handler_200() {
     let pool = setup_db().await;
     let app = build_app(pool.clone()).await;
 
@@ -237,7 +237,7 @@ async fn merchant_get_payments_reaches_handler_501() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), axum::http::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
 }
 
 #[tokio::test]

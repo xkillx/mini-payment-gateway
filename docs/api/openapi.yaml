@@ -32,15 +32,75 @@ paths:
     get:
       operationId: listPayments
       summary: List payments (Merchant or Administrator)
+      description: |
+        Returns a paginated list of Payments ordered by `created_at DESC, id DESC`.
+
+        - Merchants always see only Payments owned by their own Merchant Account.
+        - Administrators see all Payments unless `merchant_id` is supplied to filter to one Merchant Account.
+        - Merchants that supply `merchant_id` receive `403` (forbidden), even if the value is malformed.
+        - `search` matches an exact Payment ID (when the value parses as a UUID) and
+          a case-insensitive partial Merchant Reference stored in
+          `metadata.merchant_reference` (string values only).
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of items to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of items to skip
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PaymentStatus"
+          description: Filter by exact Payment Status
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: |
+            Search term matched against Payment ID (exact UUID match) and
+            `metadata.merchant_reference` (case-insensitive partial match).
+            Whitespace is trimmed; empty or whitespace-only is treated as absent.
+        - name: merchant_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: |
+            Administrator-only filter to scope the list to a single Merchant Account.
+            Merchants that supply this parameter receive `403`.
       responses:
+        "200":
+          description: Paginated list of Payments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createPayment
       summary: Create a payment (Merchant only)
@@ -469,7 +529,12 @@ components:
           description: ISO 4217 currency code — must match the gateway's Configured Currency (default USD)
         metadata:
           type: object
-          description: Optional Payment Metadata for merchant reconciliation. Must be a JSON object ≤4096 bytes serialized. Defaults to {}.
+          description: |
+            Optional Payment Metadata for merchant reconciliation. Must be a JSON object
+            ≤4096 bytes serialized. Defaults to {}.
+
+            When `metadata.merchant_reference` is supplied as a string, it is the
+            Merchant Reference used by payment search on `GET /api/v1/payments`.
           default: {}
       additionalProperties: false
 
@@ -498,7 +563,10 @@ components:
           $ref: "#/components/schemas/PaymentStatus"
         metadata:
           type: object
-          description: Payment Metadata attached at creation
+          description: |
+            Payment Metadata attached at creation. When `metadata.merchant_reference`
+            is supplied as a string, it is the Merchant Reference used by payment
+            search on `GET /api/v1/payments`.
         created_at:
           type: string
           format: date-time
@@ -507,6 +575,67 @@ components:
           type: string
           format: date-time
           description: When the Payment was last updated
+
+    PaymentListItemResponse:
+      type: object
+      required:
+        - id
+        - merchant_id
+        - amount_minor
+        - currency
+        - status
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Payment ID
+        merchant_id:
+          type: string
+          format: uuid
+          description: Owning Merchant Account ID
+        amount_minor:
+          type: integer
+          description: Payment Amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        metadata:
+          type: object
+          description: |
+            Payment Metadata attached at creation. When `metadata.merchant_reference`
+            is supplied as a string, it is the Merchant Reference used by payment
+            search on `GET /api/v1/payments`.
+        created_at:
+          type: string
+          format: date-time
+          description: When the Payment was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Payment was last updated
+
+    PaymentListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentListItemResponse"
+        limit:
+          type: integer
+          description: Maximum number of items returned
+        offset:
+          type: integer
+          description: Number of items skipped
 
     PaymentStatus:
       type: string
@@ -687,7 +816,10 @@ components:
           $ref: "#/components/schemas/PaymentStatus"
         metadata:
           type: object
-          description: Payment Metadata attached at creation
+          description: |
+            Payment Metadata attached at creation. When `metadata.merchant_reference`
+            is supplied as a string, it is the Merchant Reference used by payment
+            search on `GET /api/v1/payments`.
         created_at:
           type: string
           format: date-time
