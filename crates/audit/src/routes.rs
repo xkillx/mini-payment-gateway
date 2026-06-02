@@ -44,7 +44,7 @@ async fn list_audit_records(
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
 
-    if limit < 1 || limit > 200 {
+    if !(1..=200).contains(&limit) {
         return Err(invalid_param("limit"));
     }
     if offset < 0 {

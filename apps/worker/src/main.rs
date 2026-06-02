@@ -1,3 +1,4 @@
+use payments::service::{process_next_pending_payment, PaymentProcessingOutcome};
 use shared_config::AppConfig;
 use shared_db as db;
 use shared_observability as observability;
@@ -14,12 +15,33 @@ struct PendingNotification {
 
 async fn poll_notifications(pool: &PgPool, config: &AppConfig) {
     loop {
-        let result = try_process_notifications(pool, config).await;
-        if let Err(e) = result {
+        if let Err(e) = try_process_payment(pool).await {
+            tracing::error!("Payment processing error: {e}");
+        }
+        if let Err(e) = try_process_notifications(pool, config).await {
             tracing::error!("Notification processing error: {e}");
         }
         tokio::time::sleep(Duration::from_millis(config.worker_poll_interval_ms)).await;
     }
+}
+
+async fn try_process_payment(pool: &PgPool) -> Result<(), anyhow::Error> {
+    match process_next_pending_payment(pool, PaymentProcessingOutcome::simulated_success()).await {
+        Ok(Some(payment)) => {
+            tracing::info!(
+                payment_id = %payment.id,
+                status = ?payment.status,
+                "Payment processed"
+            );
+        }
+        Ok(None) => {
+            tracing::debug!("No pending payments to process");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to process pending payment");
+        }
+    }
+    Ok(())
 }
 
 async fn try_process_notifications(pool: &PgPool, config: &AppConfig) -> Result<(), anyhow::Error> {

@@ -368,6 +368,13 @@ events:
         - metadata
         - idempotency_key
         - created_at
+    payment.processing:
+      trigger: "Payment transitions from pending to processing"
+      payload:
+        - payment_id
+        - amount_minor
+        - currency
+        - processing_started_at
     payment.successful:
       trigger: "Payment transitions from processing to successful"
       payload:
@@ -419,6 +426,7 @@ commands:
       - "Payment status is pending"
     output: "Payment transitions to processing, then successful or failed"
     events_emitted:
+      - payment.processing
       - payment.successful
       - payment.failed
 

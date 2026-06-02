@@ -16,7 +16,7 @@ make migrate
 # Start API server (port 4000)
 make run-api
 
-# Start worker (notification processing)
+# Start worker (payment processing and notification delivery)
 make run-worker
 ```
 

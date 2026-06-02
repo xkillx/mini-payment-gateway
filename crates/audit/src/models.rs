@@ -52,8 +52,8 @@ pub mod actions {
     pub const AUTH_AUTHENTICATION_FAILED: &str = "auth.authentication_failed";
     pub const AUTH_AUTHORIZATION_FAILED: &str = "auth.authorization_failed";
     pub const PAYMENT_CREATED: &str = "payment.created";
-    pub const PAYMENT_PROCESSING_STARTED: &str = "payment.processing_started";
-    pub const PAYMENT_SUCCEEDED: &str = "payment.succeeded";
+    pub const PAYMENT_PROCESSING: &str = "payment.processing";
+    pub const PAYMENT_SUCCESSFUL: &str = "payment.successful";
     pub const PAYMENT_FAILED: &str = "payment.failed";
     pub const REFUND_REQUESTED: &str = "refund.requested";
     pub const REFUND_COMPLETED: &str = "refund.completed";

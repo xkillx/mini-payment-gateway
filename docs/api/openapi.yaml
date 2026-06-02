@@ -567,6 +567,12 @@ components:
             Payment Metadata attached at creation. When `metadata.merchant_reference`
             is supplied as a string, it is the Merchant Reference used by payment
             search on `GET /api/v1/payments`.
+        failure_reason:
+          type: string
+          nullable: true
+          description: |
+            Reason the Payment failed processing. `null` unless `status` is `failed`.
+            Recorded by the System Principal, not by Payment Metadata.
         created_at:
           type: string
           format: date-time
@@ -610,6 +616,12 @@ components:
             Payment Metadata attached at creation. When `metadata.merchant_reference`
             is supplied as a string, it is the Merchant Reference used by payment
             search on `GET /api/v1/payments`.
+        failure_reason:
+          type: string
+          nullable: true
+          description: |
+            Reason the Payment failed processing. `null` unless `status` is `failed`.
+            Recorded by the System Principal, not by Payment Metadata.
         created_at:
           type: string
           format: date-time
@@ -694,7 +706,9 @@ components:
           nullable: true
           description: |
             Optional event-specific context. For `payment.failed` events this includes a
-            `failure_reason` field when present in the event payload.
+            `failure_reason` field when present in the event payload. Other lifecycle
+            events (e.g. `payment.processing`, `payment.successful`) do not carry
+            additional details.
 
     PaymentRefundSummary:
       type: object
@@ -820,6 +834,12 @@ components:
             Payment Metadata attached at creation. When `metadata.merchant_reference`
             is supplied as a string, it is the Merchant Reference used by payment
             search on `GET /api/v1/payments`.
+        failure_reason:
+          type: string
+          nullable: true
+          description: |
+            Reason the Payment failed processing. `null` unless `status` is `failed`.
+            Recorded by the System Principal, not by Payment Metadata.
         created_at:
           type: string
           format: date-time

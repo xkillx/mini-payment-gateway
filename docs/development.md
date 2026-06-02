@@ -7,7 +7,7 @@ Modular monolith with domain-first module boundaries:
 ```
 apps/
   api/       - Axum HTTP server
-  worker/    - Background job worker (notification delivery)
+  worker/    - Background job worker (payment processing and notification delivery)
   migrate/   - Migration runner + seed
 
 crates/

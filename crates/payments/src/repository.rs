@@ -1,7 +1,8 @@
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use uuid::Uuid;
 
-use crate::models::{Payment, PaymentListFilter};
+use crate::models::{Payment, PaymentListFilter, PaymentStatus};
 
 pub trait PaymentRepository: Send + Sync {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Payment>, sqlx::Error>;
@@ -50,8 +51,8 @@ impl PaymentRepository for PostgresPaymentRepository {
     async fn insert(&self, payment: &Payment) -> Result<Payment, sqlx::Error> {
         sqlx::query_as::<_, Payment>(
             r#"
-            INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, failure_reason, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
             "#,
         )
@@ -62,6 +63,7 @@ impl PaymentRepository for PostgresPaymentRepository {
         .bind(&payment.status)
         .bind(&payment.idempotency_key)
         .bind(&payment.metadata)
+        .bind(&payment.failure_reason)
         .bind(payment.created_at)
         .bind(payment.updated_at)
         .fetch_one(&self.pool)
@@ -102,8 +104,8 @@ impl PaymentRepository for PostgresPaymentRepository {
     ) -> Result<Option<Payment>, sqlx::Error> {
         sqlx::query_as::<_, Payment>(
             r#"
-            INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, failure_reason, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (merchant_id, idempotency_key) DO NOTHING
             RETURNING *
             "#,
@@ -115,6 +117,7 @@ impl PaymentRepository for PostgresPaymentRepository {
         .bind(&payment.status)
         .bind(&payment.idempotency_key)
         .bind(&payment.metadata)
+        .bind(&payment.failure_reason)
         .bind(payment.created_at)
         .bind(payment.updated_at)
         .fetch_optional(&self.pool)
@@ -186,8 +189,8 @@ pub async fn insert_payment_in_tx(
 ) -> Result<Option<Payment>, sqlx::Error> {
     sqlx::query_as::<_, Payment>(
         r#"
-        INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, failure_reason, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (merchant_id, idempotency_key) DO NOTHING
         RETURNING *
         "#,
@@ -199,6 +202,7 @@ pub async fn insert_payment_in_tx(
     .bind(&payment.status)
     .bind(&payment.idempotency_key)
     .bind(&payment.metadata)
+    .bind(&payment.failure_reason)
     .bind(payment.created_at)
     .bind(payment.updated_at)
     .fetch_optional(tx.as_mut())
@@ -224,4 +228,90 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Payment>, sqlx
         .bind(id)
         .fetch_optional(pool)
         .await
+}
+
+pub async fn claim_pending_payment_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    payment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Option<Payment>, sqlx::Error> {
+    sqlx::query_as::<_, Payment>(
+        r#"
+        UPDATE payments
+        SET status = 'processing', failure_reason = NULL, updated_at = $2
+        WHERE id = $1 AND status = 'pending'
+        RETURNING *
+        "#,
+    )
+    .bind(payment_id)
+    .bind(now)
+    .fetch_optional(tx.as_mut())
+    .await
+}
+
+pub async fn claim_next_pending_payment_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    now: DateTime<Utc>,
+) -> Result<Option<Payment>, sqlx::Error> {
+    sqlx::query_as::<_, Payment>(
+        r#"
+        WITH next_pending AS (
+            SELECT id
+            FROM payments
+            WHERE status = 'pending'
+            ORDER BY created_at ASC, id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+        )
+        UPDATE payments
+        SET status = 'processing', failure_reason = NULL, updated_at = $1
+        FROM next_pending
+        WHERE payments.id = next_pending.id
+        RETURNING payments.*
+        "#,
+    )
+    .bind(now)
+    .fetch_optional(tx.as_mut())
+    .await
+}
+
+pub async fn finalize_processing_payment_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    payment_id: Uuid,
+    final_status: PaymentStatus,
+    failure_reason: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<Option<Payment>, sqlx::Error> {
+    let status_str: &'static str = match final_status {
+        PaymentStatus::Successful => "successful",
+        PaymentStatus::Failed => "failed",
+        _ => {
+            return Err(sqlx::Error::Protocol(
+                "finalize_processing_payment_in_tx only accepts Successful or Failed".into(),
+            ));
+        }
+    };
+
+    let failure_reason_param: Option<&str> = match final_status {
+        PaymentStatus::Failed => failure_reason,
+        PaymentStatus::Successful => None,
+        _ => None,
+    };
+
+    sqlx::query_as::<_, Payment>(
+        r#"
+        UPDATE payments
+        SET status = $2::payment_status,
+            failure_reason = $3,
+            updated_at = $4
+        WHERE id = $1 AND status = 'processing'
+        RETURNING *
+        "#,
+    )
+    .bind(payment_id)
+    .bind(status_str)
+    .bind(failure_reason_param)
+    .bind(now)
+    .fetch_optional(tx.as_mut())
+    .await
 }

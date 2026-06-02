@@ -10,7 +10,6 @@ No tickets currently assigned.
 
 ### Backlog
 
-- [MPG-008](#mpg-008-process-payment-transaction)
 - [MPG-009](#mpg-009-record-payment-events)
 - [MPG-010](#mpg-010-create-refund-request)
 - [MPG-011](#mpg-011-prevent-invalid-and-duplicate-refunds)
@@ -41,6 +40,7 @@ No tickets currently assigned.
 - [MPG-005](#mpg-005-create-payment-request)
 - [MPG-006](#mpg-006-view-payment-details)
 - [MPG-007](#mpg-007-list-search-and-filter-payments)
+- [MPG-008](#mpg-008-process-payment-transaction)
 
 ---
 

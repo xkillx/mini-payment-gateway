@@ -22,6 +22,7 @@ pub struct Payment {
     pub status: PaymentStatus,
     pub idempotency_key: String,
     pub metadata: serde_json::Value,
+    pub failure_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -33,6 +34,7 @@ pub struct PaymentResponse {
     pub currency: String,
     pub status: PaymentStatus,
     pub metadata: serde_json::Value,
+    pub failure_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -45,6 +47,7 @@ impl From<Payment> for PaymentResponse {
             currency: p.currency,
             status: p.status,
             metadata: p.metadata,
+            failure_reason: p.failure_reason,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }
@@ -59,6 +62,7 @@ pub struct PaymentDetailResponse {
     pub currency: String,
     pub status: PaymentStatus,
     pub metadata: serde_json::Value,
+    pub failure_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub status_history: Vec<PaymentStatusHistoryEntry>,
@@ -109,6 +113,7 @@ pub struct PaymentListItemResponse {
     pub currency: String,
     pub status: PaymentStatus,
     pub metadata: serde_json::Value,
+    pub failure_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -122,6 +127,7 @@ impl From<Payment> for PaymentListItemResponse {
             currency: p.currency,
             status: p.status,
             metadata: p.metadata,
+            failure_reason: p.failure_reason,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }
@@ -218,6 +224,7 @@ mod tests {
             status: PaymentStatus::Pending,
             idempotency_key: "test-key".into(),
             metadata: serde_json::json!({"foo": "bar"}),
+            failure_reason: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -226,6 +233,26 @@ mod tests {
         assert!(value.get("merchant_id").is_none());
         assert!(value.get("idempotency_key").is_none());
         assert_eq!(value["metadata"]["foo"], "bar");
+        assert!(value["failure_reason"].is_null());
+    }
+
+    #[test]
+    fn payment_response_propagates_failure_reason_when_failed() {
+        let payment = Payment {
+            id: Uuid::nil(),
+            merchant_id: Uuid::nil(),
+            amount_minor: 1000,
+            currency: "USD".into(),
+            status: PaymentStatus::Failed,
+            idempotency_key: "test-key".into(),
+            metadata: serde_json::json!({}),
+            failure_reason: Some("simulated_processor_decline".into()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let response: PaymentResponse = payment.into();
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["failure_reason"], "simulated_processor_decline");
     }
 
     #[test]
@@ -245,6 +272,7 @@ mod tests {
             currency: "USD".into(),
             status: PaymentStatus::Pending,
             metadata: serde_json::json!({"foo": "bar"}),
+            failure_reason: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             status_history: vec![],
@@ -260,6 +288,7 @@ mod tests {
             value["notification_delivery_records"],
             serde_json::json!([])
         );
+        assert!(value["failure_reason"].is_null());
     }
 
     #[test]
@@ -333,6 +362,7 @@ mod tests {
             status: PaymentStatus::Pending,
             idempotency_key: "test-key".into(),
             metadata: serde_json::json!({"merchant_reference": "ORD-123"}),
+            failure_reason: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -343,6 +373,7 @@ mod tests {
         assert_eq!(value["amount_minor"], 1000);
         assert_eq!(value["status"], "pending");
         assert_eq!(value["metadata"]["merchant_reference"], "ORD-123");
+        assert!(value["failure_reason"].is_null());
     }
 
     #[test]

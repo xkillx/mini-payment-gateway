@@ -8,6 +8,7 @@ shared-config = { path = "../../crates/shared-config" }
 shared-db = { path = "../../crates/shared-db" }
 shared-observability = { path = "../../crates/shared-observability" }
 notifications = { path = "../../crates/notifications" }
+payments = { path = "../../crates/payments" }
 
 tokio = { workspace = true }
 tracing = { workspace = true }

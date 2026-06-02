@@ -36,6 +36,10 @@ _Avoid_: Transaction status
 Payment Status History is the ordered record of Payment Statuses a Payment has reached during its lifecycle, including status changes caused by completed Refunds.
 _Avoid_: Transaction history, audit history
 
+**Payment Processing Outcome**:
+A Payment Processing Outcome is the System Principal's result for processing a Payment: successful or failed. A failed outcome may include a failure reason; merchant-supplied Payment Metadata does not decide the outcome.
+_Avoid_: Merchant-selected outcome, metadata-driven outcome
+
 **Refund**:
 A Refund is a reversal of value against one successful Payment.
 _Avoid_: Reversal transaction, chargeback
@@ -106,6 +110,7 @@ _Avoid_: System user, service account
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
 - "Transaction history" in planning docs means **Payment Status History** when discussing a Payment's lifecycle statuses.
 - "Payment metadata" in planning docs means **Payment Metadata**, not a separate Payment Request object or mutable lifecycle details. Payment Metadata is part of the create command identified by an **Idempotency Key**.
+- A **Payment Processing Outcome** is decided by the **System Principal**; do not infer it from **Payment Metadata**.
 - An **Idempotency Key** identifies a create command from the Merchant; it is not the Payment identifier and does not replace the Actor or Merchant Account identity.
 - **Configured Currency** is a gateway-level MVP constraint; Payments in any other currency are rejected rather than converted.
 - "Amount" in planning docs means **Payment Amount** in minor units; decimal or display-form money is not accepted at the command boundary.
@@ -125,6 +130,8 @@ _Avoid_: System user, service account
 
 - Dev: "Can I process this payment now?"
 - Domain expert: "Yes, if the payment is pending and not already processing."
+- Dev: "Can the merchant metadata make this payment fail?"
+- Domain expert: "No. A Payment Processing Outcome is decided by the System Principal, not by Payment Metadata."
 - Dev: "Is this payment refunded?"
 - Domain expert: "Only when the full original amount has been refunded."
 - Dev: "Can this actor see every payment?"

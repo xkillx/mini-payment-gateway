@@ -62,6 +62,7 @@ pub async fn create_payment(
         status: PaymentStatus::Pending,
         idempotency_key: cmd.idempotency_key.clone(),
         metadata: cmd.metadata.clone(),
+        failure_reason: None,
         created_at: now,
         updated_at: now,
     };
@@ -280,6 +281,7 @@ pub async fn get_payment_detail(
         currency: payment.currency,
         status: payment.status,
         metadata: payment.metadata,
+        failure_reason: payment.failure_reason,
         created_at: payment.created_at,
         updated_at: payment.updated_at,
         status_history,
@@ -341,6 +343,326 @@ pub async fn list_payments(
         limit,
         offset,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaymentProcessingOutcome {
+    Successful,
+    Failed { failure_reason: String },
+}
+
+impl PaymentProcessingOutcome {
+    pub fn simulated_success() -> Self {
+        Self::Successful
+    }
+
+    pub fn failure_reason(&self) -> Option<&str> {
+        match self {
+            Self::Successful => None,
+            Self::Failed { failure_reason } => Some(failure_reason.as_str()),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessPaymentError {
+    #[error("Payment not found")]
+    NotFound,
+    #[error("Payment is not in a state that allows processing: {0}")]
+    InvalidState(String),
+    #[error("Processing outcome is invalid: {0}")]
+    InvalidOutcome(String),
+    #[error("Database error: {0}")]
+    Database(String),
+    #[error("Audit error: {0}")]
+    Audit(#[from] AuditError),
+}
+
+impl From<sqlx::Error> for ProcessPaymentError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+pub async fn process_payment(
+    pool: &PgPool,
+    payment_id: Uuid,
+    outcome: PaymentProcessingOutcome,
+) -> Result<Payment, ProcessPaymentError> {
+    let existing = repository::find_by_id(pool, payment_id)
+        .await?
+        .ok_or(ProcessPaymentError::NotFound)?;
+
+    if existing.status != PaymentStatus::Pending {
+        return Err(ProcessPaymentError::InvalidState(format!(
+            "payment status is {}; only pending payments can be processed",
+            payment_status_str(&existing.status)
+        )));
+    }
+
+    if let Some(reason) = outcome.failure_reason() {
+        if reason.trim().is_empty() {
+            return Err(ProcessPaymentError::InvalidOutcome(
+                "failure_reason must be a non-empty string".into(),
+            ));
+        }
+    }
+
+    run_claim(pool, payment_id).await?;
+    run_finalize(pool, payment_id, &outcome).await?;
+
+    let finalized = repository::find_by_id(pool, payment_id)
+        .await?
+        .ok_or(ProcessPaymentError::NotFound)?;
+    Ok(finalized)
+}
+
+pub async fn process_next_pending_payment(
+    pool: &PgPool,
+    outcome: PaymentProcessingOutcome,
+) -> Result<Option<Payment>, ProcessPaymentError> {
+    if let Some(reason) = outcome.failure_reason() {
+        if reason.trim().is_empty() {
+            return Err(ProcessPaymentError::InvalidOutcome(
+                "failure_reason must be a non-empty string".into(),
+            ));
+        }
+    }
+
+    let claimed = run_claim_next(pool).await?;
+    let Some(claimed) = claimed else {
+        return Ok(None);
+    };
+
+    run_finalize(pool, claimed.id, &outcome).await?;
+
+    let finalized = repository::find_by_id(pool, claimed.id)
+        .await?
+        .ok_or(ProcessPaymentError::NotFound)?;
+    Ok(Some(finalized))
+}
+
+async fn run_claim(pool: &PgPool, payment_id: Uuid) -> Result<(), ProcessPaymentError> {
+    let mut tx = pool.begin().await?;
+    let now = Utc::now();
+
+    let claimed = repository::claim_pending_payment_in_tx(&mut tx, payment_id, now).await?;
+    let claimed = match claimed {
+        Some(p) => p,
+        None => {
+            return Err(ProcessPaymentError::InvalidState(
+                "payment could not be claimed for processing".into(),
+            ));
+        }
+    };
+
+    insert_processing_domain_event(&mut tx, &claimed, now).await?;
+    insert_processing_audit_record(&mut tx, &claimed, now).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn run_claim_next(pool: &PgPool) -> Result<Option<Payment>, ProcessPaymentError> {
+    let mut tx = pool.begin().await?;
+    let now = Utc::now();
+
+    let claimed = repository::claim_next_pending_payment_in_tx(&mut tx, now).await?;
+    let Some(claimed) = claimed else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+
+    insert_processing_domain_event(&mut tx, &claimed, now).await?;
+    insert_processing_audit_record(&mut tx, &claimed, now).await?;
+
+    tx.commit().await?;
+    Ok(Some(claimed))
+}
+
+async fn run_finalize(
+    pool: &PgPool,
+    payment_id: Uuid,
+    outcome: &PaymentProcessingOutcome,
+) -> Result<(), ProcessPaymentError> {
+    let mut tx = pool.begin().await?;
+    let now = Utc::now();
+
+    let final_status = match outcome {
+        PaymentProcessingOutcome::Successful => PaymentStatus::Successful,
+        PaymentProcessingOutcome::Failed { .. } => PaymentStatus::Failed,
+    };
+
+    let finalized = repository::finalize_processing_payment_in_tx(
+        &mut tx,
+        payment_id,
+        final_status.clone(),
+        outcome.failure_reason(),
+        now,
+    )
+    .await?;
+
+    let finalized = match finalized {
+        Some(p) => p,
+        None => {
+            return Err(ProcessPaymentError::InvalidState(
+                "payment could not be finalized from processing".into(),
+            ));
+        }
+    };
+
+    insert_finalize_domain_event(&mut tx, &finalized, outcome, now).await?;
+    insert_finalize_audit_record(&mut tx, &finalized, outcome, now).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn insert_processing_domain_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    payment: &Payment,
+    now: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(event_id)
+    .bind("payment.processing")
+    .bind("payment")
+    .bind(payment.id)
+    .bind(json!({
+        "payment_id": payment.id.to_string(),
+        "amount_minor": payment.amount_minor,
+        "currency": payment.currency,
+        "processing_started_at": now,
+    }))
+    .bind(1i32)
+    .bind(now)
+    .execute(tx.as_mut())
+    .await?;
+    Ok(())
+}
+
+async fn insert_processing_audit_record(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    payment: &Payment,
+    now: DateTime<Utc>,
+) -> Result<(), ProcessPaymentError> {
+    let record = NewAuditRecord {
+        id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        actor_id: None,
+        actor_type: ActorType::SYSTEM.into(),
+        action: actions::PAYMENT_PROCESSING.into(),
+        resource_type: "payment".into(),
+        resource_id: payment.id.to_string(),
+        details: Some(json!({
+            "previous_status": "pending",
+            "status": "processing",
+        })),
+        occurred_at: now,
+        created_at: now,
+    };
+    record_required_in_tx(tx, record).await?;
+    Ok(())
+}
+
+async fn insert_finalize_domain_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    payment: &Payment,
+    outcome: &PaymentProcessingOutcome,
+    now: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let event_type = match outcome {
+        PaymentProcessingOutcome::Successful => "payment.successful",
+        PaymentProcessingOutcome::Failed { .. } => "payment.failed",
+    };
+    let payload = match outcome {
+        PaymentProcessingOutcome::Successful => json!({
+            "payment_id": payment.id.to_string(),
+            "amount_minor": payment.amount_minor,
+            "currency": payment.currency,
+            "processed_at": now,
+        }),
+        PaymentProcessingOutcome::Failed { failure_reason } => json!({
+            "payment_id": payment.id.to_string(),
+            "amount_minor": payment.amount_minor,
+            "currency": payment.currency,
+            "failure_reason": failure_reason,
+            "processed_at": now,
+        }),
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(event_id)
+    .bind(event_type)
+    .bind("payment")
+    .bind(payment.id)
+    .bind(payload)
+    .bind(1i32)
+    .bind(now)
+    .execute(tx.as_mut())
+    .await?;
+    Ok(())
+}
+
+async fn insert_finalize_audit_record(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    payment: &Payment,
+    outcome: &PaymentProcessingOutcome,
+    now: DateTime<Utc>,
+) -> Result<(), ProcessPaymentError> {
+    let mut details = json!({
+        "previous_status": "processing",
+        "status": payment_status_str(&payment.status),
+        "outcome": match outcome {
+            PaymentProcessingOutcome::Successful => "successful",
+            PaymentProcessingOutcome::Failed { .. } => "failed",
+        },
+    });
+    if let PaymentProcessingOutcome::Failed { failure_reason } = outcome {
+        details["failure_reason"] = json!(failure_reason);
+    }
+    let record = NewAuditRecord {
+        id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        actor_id: None,
+        actor_type: ActorType::SYSTEM.into(),
+        action: payment_status_to_audit_action(&payment.status).to_string(),
+        resource_type: "payment".into(),
+        resource_id: payment.id.to_string(),
+        details: Some(details),
+        occurred_at: now,
+        created_at: now,
+    };
+    record_required_in_tx(tx, record).await?;
+    Ok(())
+}
+
+fn payment_status_str(status: &PaymentStatus) -> &'static str {
+    match status {
+        PaymentStatus::Pending => "pending",
+        PaymentStatus::Processing => "processing",
+        PaymentStatus::Successful => "successful",
+        PaymentStatus::Failed => "failed",
+        PaymentStatus::Refunded => "refunded",
+    }
+}
+
+fn payment_status_to_audit_action(status: &PaymentStatus) -> &'static str {
+    match status {
+        PaymentStatus::Successful => actions::PAYMENT_SUCCESSFUL,
+        PaymentStatus::Failed => actions::PAYMENT_FAILED,
+        _ => actions::PAYMENT_PROCESSING,
+    }
 }
 
 pub fn map_event_to_status(event_type: &str) -> Option<(PaymentStatus, Option<serde_json::Value>)> {
@@ -462,5 +784,23 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].status, PaymentStatus::Pending);
         assert_eq!(entries[1].status, PaymentStatus::Successful);
+    }
+
+    #[test]
+    fn processing_outcome_simulated_success_has_no_failure_reason() {
+        let outcome = PaymentProcessingOutcome::simulated_success();
+        assert_eq!(outcome, PaymentProcessingOutcome::Successful);
+        assert!(outcome.failure_reason().is_none());
+    }
+
+    #[test]
+    fn processing_outcome_failed_exposes_failure_reason() {
+        let outcome = PaymentProcessingOutcome::Failed {
+            failure_reason: "simulated_processor_decline".into(),
+        };
+        assert_eq!(
+            outcome.failure_reason(),
+            Some("simulated_processor_decline")
+        );
     }
 }

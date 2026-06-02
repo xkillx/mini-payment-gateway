@@ -226,6 +226,11 @@ Every domain event uses the following immutable envelope:
 - **Trigger:** Payment entity created via create payment command.
 - **Payload:** `payment_id`, `merchant_id`, `amount_minor`, `currency`, `metadata`, `idempotency_key`, `created_at`
 
+#### `payment.processing`
+
+- **Trigger:** Payment transitions from `pending` to `processing`.
+- **Payload:** `payment_id`, `amount_minor`, `currency`, `processing_started_at`
+
 #### `payment.successful`
 
 - **Trigger:** Payment transitions from `processing` to `successful`.
@@ -248,11 +253,12 @@ Every domain event uses the following immutable envelope:
 
 ### 4.3 Notification Mapping
 
-Each domain event type triggers creation of a Notification Delivery Record with `status: pending`.
+Externally delivered domain event types trigger creation of a Notification Delivery Record with `status: pending`.
 
 | Event Type | Notification Record Created | Destination |
 |---|---|---|
 | `payment.created` | Yes | Merchant-configured endpoint |
+| `payment.processing` | No | Internal lifecycle event only |
 | `payment.successful` | Yes | Merchant-configured endpoint |
 | `payment.failed` | Yes | Merchant-configured endpoint |
 | `refund.created` | Yes | Merchant-configured endpoint |
@@ -279,7 +285,7 @@ Each domain event type triggers creation of a Notification Delivery Record with 
 | **Idempotency key required** | No (triggered by system; idempotency enforced by state guard) |
 | **Preconditions** | Payment status is `pending` |
 | **Output** | Payment transitions to `processing`, then `successful` or `failed` |
-| **Events emitted** | `payment.successful` or `payment.failed` |
+| **Events emitted** | `payment.processing`, then `payment.successful` or `payment.failed` |
 
 ### 5.3 Create Refund
 

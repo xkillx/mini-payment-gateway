@@ -131,9 +131,9 @@ async fn merchant_creates_payment_returns_201() {
     assert_eq!(body["currency"], "USD");
     assert_eq!(body["status"], "pending");
     assert_eq!(body["metadata"]["order_ref"], "ORD-123");
-    assert!(body["id"].as_str().unwrap().len() > 0);
-    assert!(body["created_at"].as_str().unwrap().len() > 0);
-    assert!(body["updated_at"].as_str().unwrap().len() > 0);
+    assert!(!body["id"].as_str().unwrap().is_empty());
+    assert!(!body["created_at"].as_str().unwrap().is_empty());
+    assert!(!body["updated_at"].as_str().unwrap().is_empty());
     assert!(body.get("merchant_id").is_none());
     assert!(body.get("idempotency_key").is_none());
 
@@ -1520,4 +1520,442 @@ async fn administrator_list_with_malformed_merchant_id_returns_422() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// -------------------------------------------------------------------------
+// MPG-008: System-initiated payment processing
+// -------------------------------------------------------------------------
+
+async fn create_pending_payment(pool: &PgPool, amount_minor: i64) -> (String, Uuid) {
+    let mut app = build_app(pool.clone()).await;
+    let idem = new_idempotency_key();
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/payments",
+        &merchant_token(),
+        Some(&idem),
+        Some(json!({
+            "amount_minor": amount_minor,
+            "currency": "USD",
+            "metadata": {"order_ref": format!("PROC-{}", new_uuid_v7())}
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let id = body["id"].as_str().unwrap().to_string();
+    let uuid = Uuid::parse_str(&id).unwrap();
+    (id, uuid)
+}
+
+#[tokio::test]
+async fn process_payment_successful_records_events_audits_and_history() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let (payment_id, payment_uuid) = create_pending_payment(&pool, 1234).await;
+
+    let result = process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect("process_payment should succeed");
+    assert_eq!(result.status, payments::models::PaymentStatus::Successful);
+    assert!(result.failure_reason.is_none());
+
+    let row: (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, failure_reason FROM payments WHERE id = $1")
+            .bind(payment_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(row.0, "successful");
+    assert!(row.1.is_none());
+
+    let event_rows: Vec<(String, i32)> = sqlx::query_as(
+        r#"SELECT event_type, version FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+           ORDER BY created_at ASC, id ASC"#,
+    )
+    .bind(payment_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let event_types: Vec<&str> = event_rows.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        event_types,
+        vec![
+            "payment.created",
+            "payment.processing",
+            "payment.successful"
+        ]
+    );
+    for r in &event_rows {
+        assert_eq!(r.1, 1);
+    }
+
+    let audit_rows: Vec<(String, Option<Uuid>, String, String, String)> = sqlx::query_as(
+        r#"SELECT action, actor_id, actor_type, resource_type, resource_id FROM audit_records
+           WHERE resource_type = 'payment' AND resource_id = $1
+           ORDER BY occurred_at ASC, created_at ASC, id ASC"#,
+    )
+    .bind(&payment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let actions: Vec<&str> = audit_rows.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        actions,
+        vec![
+            "payment.created",
+            "payment.processing",
+            "payment.successful"
+        ]
+    );
+    for (action, actor_id, actor_type, resource_type, resource_id) in &audit_rows {
+        assert_eq!(resource_type, "payment");
+        assert_eq!(resource_id, &payment_id);
+        if action != "payment.created" {
+            assert!(actor_id.is_none(), "system actions must have NULL actor_id");
+            assert_eq!(actor_type, "system");
+        }
+    }
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["status"], "successful");
+    assert!(body["failure_reason"].is_null());
+
+    let history = body["status_history"].as_array().unwrap();
+    let statuses: Vec<&str> = history
+        .iter()
+        .map(|e| e["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(statuses, vec!["pending", "processing", "successful"]);
+    let sources: Vec<&str> = history
+        .iter()
+        .map(|e| e["source_event_type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        sources,
+        vec![
+            "payment.created",
+            "payment.processing",
+            "payment.successful"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn process_payment_failed_records_failure_reason_in_row_event_and_history() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let (payment_id, payment_uuid) = create_pending_payment(&pool, 2000).await;
+
+    let result = process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::Failed {
+            failure_reason: "simulated_processor_decline".into(),
+        },
+    )
+    .await
+    .expect("process_payment should succeed for failure");
+    assert_eq!(result.status, payments::models::PaymentStatus::Failed);
+    assert_eq!(
+        result.failure_reason.as_deref(),
+        Some("simulated_processor_decline")
+    );
+
+    let row: (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, failure_reason FROM payments WHERE id = $1")
+            .bind(payment_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(row.0, "failed");
+    assert_eq!(row.1.as_deref(), Some("simulated_processor_decline"));
+
+    let failed_event: (String, serde_json::Value) = sqlx::query_as(
+        r#"SELECT event_type, payload FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+             AND event_type = 'payment.failed'"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(failed_event.0, "payment.failed");
+    assert_eq!(
+        failed_event.1["failure_reason"],
+        "simulated_processor_decline"
+    );
+
+    let mut detail_app = build_app(pool.clone()).await;
+    let (detail_status, detail_body) = send_request(
+        &mut detail_app,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(detail_status, axum::http::StatusCode::OK);
+    assert_eq!(detail_body["status"], "failed");
+    assert_eq!(detail_body["failure_reason"], "simulated_processor_decline");
+
+    let history = detail_body["status_history"].as_array().unwrap();
+    let failed_entry = history
+        .iter()
+        .find(|e| e["status"] == "failed")
+        .expect("failed status entry should be present");
+    assert_eq!(
+        failed_entry["details"]["failure_reason"],
+        "simulated_processor_decline"
+    );
+
+    let mut list_app = build_app(pool.clone()).await;
+    let (list_status, list_body) = send_request(
+        &mut list_app,
+        axum::http::Method::GET,
+        "/api/v1/payments?status=failed&limit=200",
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    let our_item = items
+        .iter()
+        .find(|i| i["id"] == payment_id)
+        .expect("processed failed payment should be in the list");
+    assert_eq!(our_item["failure_reason"], "simulated_processor_decline");
+}
+
+#[tokio::test]
+async fn process_payment_twice_returns_invalid_state_and_creates_no_extra_events() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let (payment_id, payment_uuid) = create_pending_payment(&pool, 999).await;
+
+    process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect("first process_payment should succeed");
+
+    let event_count_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM domain_events WHERE aggregate_type = 'payment' AND aggregate_id = $1",
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let audit_count_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_records WHERE resource_type = 'payment' AND resource_id = $1",
+    )
+    .bind(&payment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let err = process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect_err("second process_payment should fail with InvalidState");
+    match err {
+        payments::service::ProcessPaymentError::InvalidState(_) => {}
+        other => panic!("expected InvalidState, got {other:?}"),
+    }
+
+    let event_count_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM domain_events WHERE aggregate_type = 'payment' AND aggregate_id = $1",
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count_after, event_count_before);
+
+    let audit_count_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_records WHERE resource_type = 'payment' AND resource_id = $1",
+    )
+    .bind(&payment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_count_after, audit_count_before);
+
+    let processing_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM domain_events WHERE aggregate_type = 'payment' AND aggregate_id = $1 AND event_type = 'payment.processing'",
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(processing_events, 1, "no extra processing events expected");
+
+    let successful_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM domain_events WHERE aggregate_type = 'payment' AND aggregate_id = $1 AND event_type = 'payment.successful'",
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(successful_events, 1, "no extra successful events expected");
+}
+
+#[tokio::test]
+async fn process_next_pending_payment_processes_only_one_payment() {
+    use payments::service::{process_next_pending_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+    let idem_a = format!("next-pending-a-{}", new_uuid_v7());
+    let idem_b = format!("next-pending-b-{}", new_uuid_v7());
+    let uuid_a = new_uuid_v7();
+    let uuid_b = new_uuid_v7();
+    let backdated = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+
+    sqlx::query(
+        r#"
+        INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, created_at, updated_at)
+        VALUES ($1, $2, 111, 'USD', 'pending', $3, '{}'::jsonb, $4, $4)
+        "#,
+    )
+    .bind(uuid_a)
+    .bind(merchant_uuid)
+    .bind(&idem_a)
+    .bind(backdated)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO payments (id, merchant_id, amount_minor, currency, status, idempotency_key, metadata, created_at, updated_at)
+        VALUES ($1, $2, 222, 'USD', 'pending', $3, '{}'::jsonb, $4, $4)
+        "#,
+    )
+    .bind(uuid_b)
+    .bind(merchant_uuid)
+    .bind(&idem_b)
+    .bind(backdated + chrono::Duration::milliseconds(1))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _ = process_next_pending_payment(&pool, PaymentProcessingOutcome::simulated_success())
+        .await
+        .expect("process_next_pending_payment should succeed");
+
+    let statuses: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT status::text, failure_reason FROM payments WHERE id = ANY($1)")
+            .bind(&[uuid_a, uuid_b][..])
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(statuses.len(), 2);
+
+    let finalized = statuses.iter().filter(|(s, _)| s == "successful").count();
+    let still_pending = statuses.iter().filter(|(s, _)| s == "pending").count();
+    assert_eq!(
+        finalized, 1,
+        "exactly one of the two test payments should be finalized by a single process_next_pending_payment call"
+    );
+    assert_eq!(
+        still_pending, 1,
+        "the other of the two test payments should remain pending after a single process_next_pending_payment call"
+    );
+}
+
+#[tokio::test]
+async fn process_payment_missing_id_returns_not_found() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let missing = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let err = process_payment(
+        &pool,
+        missing,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect_err("processing a non-existent payment should fail");
+    assert!(matches!(
+        err,
+        payments::service::ProcessPaymentError::NotFound
+    ));
+}
+
+#[tokio::test]
+async fn processing_event_creates_no_notification_delivery_records() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let (payment_id, payment_uuid) = create_pending_payment(&pool, 4321).await;
+
+    process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect("process_payment should succeed");
+
+    let notif_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM notification_delivery_records n
+           JOIN domain_events e ON e.id = n.domain_event_id
+           WHERE e.aggregate_type = 'payment' AND e.aggregate_id = $1"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        notif_count, 0,
+        "MPG-008 processing must not create notification delivery records for any lifecycle event"
+    );
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/payments/{payment_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        body["notification_delivery_records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }

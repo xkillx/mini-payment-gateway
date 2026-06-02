@@ -3116,6 +3116,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "notifications",
+ "payments",
  "reqwest",
  "serde",
  "serde_json",
