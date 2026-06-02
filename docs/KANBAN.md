@@ -10,7 +10,6 @@ No tickets currently assigned.
 
 ### Backlog
 
-- [MPG-009](#mpg-009-record-payment-events)
 - [MPG-010](#mpg-010-create-refund-request)
 - [MPG-011](#mpg-011-prevent-invalid-and-duplicate-refunds)
 - [MPG-012](#mpg-012-view-refund-history)
@@ -41,6 +40,7 @@ No tickets currently assigned.
 - [MPG-006](#mpg-006-view-payment-details)
 - [MPG-007](#mpg-007-list-search-and-filter-payments)
 - [MPG-008](#mpg-008-process-payment-transaction)
+- [MPG-009](#mpg-009-record-payment-events)
 
 ---
 
@@ -212,13 +212,14 @@ No tickets currently assigned.
 **Acceptance Criteria**
 
 - `payment.created` event is generated when a payment is created.
+- Internal `payment.processing` event is generated when a payment starts processing.
 - `payment.successful` event is generated when a payment succeeds.
 - `payment.failed` event is generated when a payment fails.
 - Events include payment identifier, event type, occurred timestamp, and payload.
 - Events are persisted before notification delivery is attempted.
 - Event generation is idempotent for duplicate lifecycle operations.
 
-**Dependencies:** MPG-005, MPG-008, MPG-013
+**Dependencies:** MPG-005, MPG-008
 
 ---
 
@@ -635,4 +636,3 @@ No tickets currently assigned.
 - Data is isolated by tenant.
 - Administrator views can filter by tenant.
 - Merchant access is limited to tenant-scoped data.
-

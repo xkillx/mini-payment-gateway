@@ -123,6 +123,7 @@ _Avoid_: System user, service account
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.
 - System-initiated work uses a **System Principal**, not an **Actor** or **Unknown Principal**.
 - Emitting a **Domain Event** means recording the immutable domain fact; creating a **Notification Delivery Record** for that event is separate notification pipeline work.
+- `payment.processing` is a **Domain Event** for the Payment lifecycle even when it is not externally delivered; not every **Domain Event** creates a **Notification Delivery Record**.
 - "Merchant reference" in planning docs means **Merchant Reference**, not the gateway Payment identifier, Idempotency Key, or arbitrary Payment Metadata.
 - "Payment identifier" in list/search planning means the Payment ID, not the **Idempotency Key** used to identify a create command.
 

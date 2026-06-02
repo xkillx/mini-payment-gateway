@@ -13,6 +13,38 @@ use audit::models::{actions, ActorType, NewAuditRecord};
 use audit::service::record_required_in_tx;
 use audit::service::AuditError;
 
+struct NewDomainEvent {
+    event_type: &'static str,
+    aggregate_type: &'static str,
+    aggregate_id: Uuid,
+    payload: serde_json::Value,
+    occurred_at: DateTime<Utc>,
+    version: i32,
+}
+
+async fn record_domain_event_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event: NewDomainEvent,
+) -> Result<Uuid, sqlx::Error> {
+    let event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(event_id)
+    .bind(event.event_type)
+    .bind(event.aggregate_type)
+    .bind(event.aggregate_id)
+    .bind(event.payload)
+    .bind(event.version)
+    .bind(event.occurred_at)
+    .execute(tx.as_mut())
+    .await?;
+    Ok(event_id)
+}
+
 #[derive(Debug)]
 pub struct CreatePaymentCommand {
     pub actor_id: Uuid,
@@ -89,29 +121,25 @@ pub async fn create_payment(
         };
         record_required_in_tx(&mut tx, audit_record).await?;
 
-        let domain_event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-        sqlx::query(
-            r#"
-            INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            "#,
+        record_domain_event_in_tx(
+            &mut tx,
+            NewDomainEvent {
+                event_type: "payment.created",
+                aggregate_type: "payment",
+                aggregate_id: created.id,
+                payload: json!({
+                    "payment_id": created.id.to_string(),
+                    "merchant_id": cmd.merchant_id.to_string(),
+                    "amount_minor": cmd.amount_minor,
+                    "currency": cmd.currency,
+                    "metadata": cmd.metadata,
+                    "idempotency_key": cmd.idempotency_key,
+                    "created_at": now,
+                }),
+                occurred_at: now,
+                version: 1,
+            },
         )
-        .bind(domain_event_id)
-        .bind("payment.created")
-        .bind("payment")
-        .bind(created.id)
-        .bind(json!({
-            "payment_id": created.id.to_string(),
-            "merchant_id": cmd.merchant_id.to_string(),
-            "amount_minor": cmd.amount_minor,
-            "currency": cmd.currency,
-            "metadata": cmd.metadata,
-            "idempotency_key": cmd.idempotency_key,
-            "created_at": created.created_at,
-        }))
-        .bind(1i32)
-        .bind(now)
-        .execute(tx.as_mut())
         .await?;
 
         tx.commit().await?;
@@ -523,26 +551,22 @@ async fn insert_processing_domain_event(
     payment: &Payment,
     now: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
-    let event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
-    sqlx::query(
-        r#"
-        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
+    record_domain_event_in_tx(
+        tx,
+        NewDomainEvent {
+            event_type: "payment.processing",
+            aggregate_type: "payment",
+            aggregate_id: payment.id,
+            payload: json!({
+                "payment_id": payment.id.to_string(),
+                "amount_minor": payment.amount_minor,
+                "currency": payment.currency,
+                "processing_started_at": now,
+            }),
+            occurred_at: now,
+            version: 1,
+        },
     )
-    .bind(event_id)
-    .bind("payment.processing")
-    .bind("payment")
-    .bind(payment.id)
-    .bind(json!({
-        "payment_id": payment.id.to_string(),
-        "amount_minor": payment.amount_minor,
-        "currency": payment.currency,
-        "processing_started_at": now,
-    }))
-    .bind(1i32)
-    .bind(now)
-    .execute(tx.as_mut())
     .await?;
     Ok(())
 }
@@ -576,7 +600,6 @@ async fn insert_finalize_domain_event(
     outcome: &PaymentProcessingOutcome,
     now: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
-    let event_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
     let event_type = match outcome {
         PaymentProcessingOutcome::Successful => "payment.successful",
         PaymentProcessingOutcome::Failed { .. } => "payment.failed",
@@ -597,20 +620,17 @@ async fn insert_finalize_domain_event(
         }),
     };
 
-    sqlx::query(
-        r#"
-        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
+    record_domain_event_in_tx(
+        tx,
+        NewDomainEvent {
+            event_type,
+            aggregate_type: "payment",
+            aggregate_id: payment.id,
+            payload,
+            occurred_at: now,
+            version: 1,
+        },
     )
-    .bind(event_id)
-    .bind(event_type)
-    .bind("payment")
-    .bind(payment.id)
-    .bind(payload)
-    .bind(1i32)
-    .bind(now)
-    .execute(tx.as_mut())
     .await?;
     Ok(())
 }

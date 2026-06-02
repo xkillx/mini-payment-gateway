@@ -173,6 +173,52 @@ async fn merchant_creates_payment_returns_201() {
     assert_eq!(event_rows[0].1, "payment");
     assert_eq!(event_rows[0].2, payment_id);
     assert_eq!(event_rows[0].3, 1);
+
+    let (payload, row_created_at): (serde_json::Value, chrono::DateTime<chrono::Utc>) =
+        sqlx::query_as(
+            r#"SELECT payload, created_at FROM domain_events
+               WHERE aggregate_type = 'payment' AND aggregate_id = $1"#,
+        )
+        .bind(payment_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let payload_obj = payload.as_object().expect("payload must be an object");
+    let mut payload_keys: Vec<&str> = payload_obj.keys().map(|s| s.as_str()).collect();
+    payload_keys.sort();
+    assert_eq!(
+        payload_keys,
+        vec![
+            "amount_minor",
+            "created_at",
+            "currency",
+            "idempotency_key",
+            "merchant_id",
+            "metadata",
+            "payment_id",
+        ],
+        "payment.created payload must contain exactly the documented schema v1 fields"
+    );
+    assert_eq!(payload["payment_id"], payment_id);
+    assert_eq!(payload["merchant_id"], MERCHANT_ACTOR_ID);
+    assert_eq!(payload["amount_minor"], 1000);
+    assert_eq!(payload["currency"], "USD");
+    assert_eq!(payload["metadata"]["order_ref"], "ORD-123");
+    assert_eq!(payload["idempotency_key"], idem_key);
+    let payload_created_at = chrono::DateTime::parse_from_rfc3339(
+        payload["created_at"]
+            .as_str()
+            .expect("created_at must be a string"),
+    )
+    .expect("payload.created_at must be RFC3339")
+    .with_timezone(&chrono::Utc);
+    assert!(
+        (payload_created_at - row_created_at)
+            .num_milliseconds()
+            .abs()
+            <= 1,
+        "payload.created_at must equal event row created_at within 1ms"
+    );
 }
 
 #[tokio::test]
@@ -257,6 +303,21 @@ async fn exact_idempotent_replay_returns_200() {
             .await
             .unwrap();
     assert_eq!(event_count_after, event_count_before);
+
+    let event_types_after: Vec<String> = sqlx::query_scalar(
+        r#"SELECT event_type FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id::text = $1
+           ORDER BY created_at ASC, id ASC"#,
+    )
+    .bind(&payment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        event_types_after,
+        vec!["payment.created".to_string()],
+        "exact idempotent replay must not create any additional domain events"
+    );
 }
 
 #[tokio::test]
@@ -1596,6 +1657,88 @@ async fn process_payment_successful_records_events_audits_and_history() {
         assert_eq!(r.1, 1);
     }
 
+    let processing_row: (serde_json::Value, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        r#"SELECT payload, created_at FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+             AND event_type = 'payment.processing'"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut processing_keys: Vec<&str> = processing_row
+        .0
+        .as_object()
+        .expect("processing payload must be an object")
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
+    processing_keys.sort();
+    assert_eq!(
+        processing_keys,
+        vec![
+            "amount_minor",
+            "currency",
+            "payment_id",
+            "processing_started_at"
+        ],
+        "payment.processing payload must contain exactly the documented schema v1 fields"
+    );
+    assert_eq!(processing_row.0["payment_id"], payment_id);
+    assert_eq!(processing_row.0["amount_minor"], 1234);
+    assert_eq!(processing_row.0["currency"], "USD");
+    let processing_started_at = chrono::DateTime::parse_from_rfc3339(
+        processing_row.0["processing_started_at"]
+            .as_str()
+            .expect("processing_started_at must be string"),
+    )
+    .expect("processing_started_at must be RFC3339")
+    .with_timezone(&chrono::Utc);
+    assert!(
+        (processing_started_at - processing_row.1)
+            .num_milliseconds()
+            .abs()
+            <= 1,
+        "payment.processing payload timestamp must equal event row created_at within 1ms"
+    );
+
+    let successful_row: (serde_json::Value, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        r#"SELECT payload, created_at FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+             AND event_type = 'payment.successful'"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut successful_keys: Vec<&str> = successful_row
+        .0
+        .as_object()
+        .expect("successful payload must be an object")
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
+    successful_keys.sort();
+    assert_eq!(
+        successful_keys,
+        vec!["amount_minor", "currency", "payment_id", "processed_at"],
+        "payment.successful payload must contain exactly the documented schema v1 fields"
+    );
+    assert_eq!(successful_row.0["payment_id"], payment_id);
+    assert_eq!(successful_row.0["amount_minor"], 1234);
+    assert_eq!(successful_row.0["currency"], "USD");
+    let processed_at = chrono::DateTime::parse_from_rfc3339(
+        successful_row.0["processed_at"]
+            .as_str()
+            .expect("processed_at must be string"),
+    )
+    .expect("processed_at must be RFC3339")
+    .with_timezone(&chrono::Utc);
+    assert!(
+        (processed_at - successful_row.1).num_milliseconds().abs() <= 1,
+        "payment.successful payload timestamp must equal event row created_at within 1ms"
+    );
+
     let audit_rows: Vec<(String, Option<Uuid>, String, String, String)> = sqlx::query_as(
         r#"SELECT action, actor_id, actor_type, resource_type, resource_id FROM audit_records
            WHERE resource_type = 'payment' AND resource_id = $1
@@ -1688,19 +1831,58 @@ async fn process_payment_failed_records_failure_reason_in_row_event_and_history(
     assert_eq!(row.0, "failed");
     assert_eq!(row.1.as_deref(), Some("simulated_processor_decline"));
 
-    let failed_event: (String, serde_json::Value) = sqlx::query_as(
-        r#"SELECT event_type, payload FROM domain_events
-           WHERE aggregate_type = 'payment' AND aggregate_id = $1
-             AND event_type = 'payment.failed'"#,
+    let failed_event: (
+        String,
+        serde_json::Value,
+        chrono::DateTime<chrono::Utc>,
+        i32,
+    ) = sqlx::query_as(
+        r#"SELECT event_type, payload, created_at, version FROM domain_events
+               WHERE aggregate_type = 'payment' AND aggregate_id = $1
+                 AND event_type = 'payment.failed'"#,
     )
     .bind(payment_uuid)
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(failed_event.0, "payment.failed");
+    assert_eq!(failed_event.3, 1);
+    let mut failed_keys: Vec<&str> = failed_event
+        .1
+        .as_object()
+        .expect("failed payload must be an object")
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
+    failed_keys.sort();
+    assert_eq!(
+        failed_keys,
+        vec![
+            "amount_minor",
+            "currency",
+            "failure_reason",
+            "payment_id",
+            "processed_at"
+        ],
+        "payment.failed payload must contain exactly the documented schema v1 fields"
+    );
+    assert_eq!(failed_event.1["payment_id"], payment_id);
+    assert_eq!(failed_event.1["amount_minor"], 2000);
+    assert_eq!(failed_event.1["currency"], "USD");
     assert_eq!(
         failed_event.1["failure_reason"],
         "simulated_processor_decline"
+    );
+    let processed_at = chrono::DateTime::parse_from_rfc3339(
+        failed_event.1["processed_at"]
+            .as_str()
+            .expect("processed_at must be string"),
+    )
+    .expect("processed_at must be RFC3339")
+    .with_timezone(&chrono::Utc);
+    assert!(
+        (processed_at - failed_event.2).num_milliseconds().abs() <= 1,
+        "payment.failed payload timestamp must equal event row created_at within 1ms"
     );
 
     let mut detail_app = build_app(pool.clone()).await;
@@ -1824,6 +2006,25 @@ async fn process_payment_twice_returns_invalid_state_and_creates_no_extra_events
     .await
     .unwrap();
     assert_eq!(successful_events, 1, "no extra successful events expected");
+
+    let event_types_after: Vec<String> = sqlx::query_scalar(
+        r#"SELECT event_type FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+           ORDER BY created_at ASC, id ASC"#,
+    )
+    .bind(payment_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        event_types_after,
+        vec![
+            "payment.created".to_string(),
+            "payment.processing".to_string(),
+            "payment.successful".to_string(),
+        ],
+        "duplicate process_payment must not create any additional domain events"
+    );
 }
 
 #[tokio::test]
@@ -1937,7 +2138,7 @@ async fn processing_event_creates_no_notification_delivery_records() {
     .unwrap();
     assert_eq!(
         notif_count, 0,
-        "MPG-008 processing must not create notification delivery records for any lifecycle event"
+        "MPG-009 must not create notification delivery records; MPG-013 owns that boundary"
     );
 
     let mut app = build_app(pool.clone()).await;
@@ -1957,5 +2158,127 @@ async fn processing_event_creates_no_notification_delivery_records() {
             .unwrap()
             .len(),
         0
+    );
+}
+
+#[tokio::test]
+async fn domain_events_reject_update() {
+    let pool = setup_db().await;
+    let (_payment_id, payment_uuid) = create_pending_payment(&pool, 5000).await;
+
+    let event_id: Uuid = sqlx::query_scalar(
+        r#"SELECT id FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1 LIMIT 1"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let update_result =
+        sqlx::query("UPDATE domain_events SET event_type = 'tampered' WHERE id = $1")
+            .bind(event_id)
+            .execute(&pool)
+            .await;
+    let err = update_result
+        .expect_err("UPDATE on domain_events must be rejected by the append-only trigger");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("append-only"),
+        "expected append-only rejection message, got: {msg}"
+    );
+
+    let unchanged_type: String =
+        sqlx::query_scalar("SELECT event_type FROM domain_events WHERE id = $1")
+            .bind(event_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(unchanged_type, "payment.created");
+}
+
+#[tokio::test]
+async fn domain_events_reject_delete() {
+    let pool = setup_db().await;
+    let (_payment_id, payment_uuid) = create_pending_payment(&pool, 5500).await;
+
+    let event_id: Uuid = sqlx::query_scalar(
+        r#"SELECT id FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1 LIMIT 1"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let delete_result = sqlx::query("DELETE FROM domain_events WHERE id = $1")
+        .bind(event_id)
+        .execute(&pool)
+        .await;
+    let err = delete_result
+        .expect_err("DELETE on domain_events must be rejected by the append-only trigger");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("append-only"),
+        "expected append-only rejection message, got: {msg}"
+    );
+
+    let still_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM domain_events WHERE id = $1")
+        .bind(event_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(still_exists, 1);
+}
+
+#[tokio::test]
+async fn payment_cannot_have_both_terminal_outcome_events() {
+    use payments::service::{process_payment, PaymentProcessingOutcome};
+
+    let pool = setup_db().await;
+    let (_payment_id, payment_uuid) = create_pending_payment(&pool, 6000).await;
+
+    process_payment(
+        &pool,
+        payment_uuid,
+        PaymentProcessingOutcome::simulated_success(),
+    )
+    .await
+    .expect("process_payment should succeed");
+
+    let conflict_event_id = new_uuid_v7();
+    let insert_result = sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, 'payment.failed', 'payment', $2, $3, 1, NOW())
+        "#,
+    )
+    .bind(conflict_event_id)
+    .bind(payment_uuid)
+    .bind(serde_json::json!({
+        "payment_id": payment_uuid.to_string(),
+        "amount_minor": 6000,
+        "currency": "USD",
+        "failure_reason": "should_not_be_recorded",
+        "processed_at": chrono::Utc::now(),
+    }))
+    .execute(&pool)
+    .await;
+    insert_result.expect_err(
+        "a payment must not be allowed to have both payment.successful and payment.failed terminal events",
+    );
+
+    let terminal_event_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM domain_events
+           WHERE aggregate_type = 'payment' AND aggregate_id = $1
+             AND event_type IN ('payment.successful', 'payment.failed')"#,
+    )
+    .bind(payment_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        terminal_event_count, 1,
+        "exactly one terminal outcome event must remain after the conflicting insert is rejected"
     );
 }
