@@ -44,6 +44,10 @@ _Avoid_: Merchant-selected outcome, metadata-driven outcome
 A Refund is a reversal of value against one successful Payment.
 _Avoid_: Reversal transaction, chargeback
 
+**Rejected Refund Attempt**:
+A Rejected Refund Attempt is an authenticated Merchant attempt to create a Refund that passes request-shape validation but violates refund business rules, so no Refund is created.
+_Avoid_: Failed refund, refund.failed, declined refund
+
 **Refunded Payment**:
 A Refunded Payment is a Payment whose original amount has been fully reversed by refunds.
 _Avoid_: Partially refunded payment
@@ -119,6 +123,7 @@ _Avoid_: System user, service account
 - MVP refund behavior is one Refund record per successful Payment; retrying after a failed Refund and multiple or partial refunds are future scope.
 - "Refund request" in planning docs means the Merchant action that creates a **Refund**; do not introduce a separate Refund Request domain object.
 - "Refund requested" in planning docs and legacy code means the **Refund** was created; use **refund.created** for the action and Domain Event name.
+- A **Rejected Refund Attempt** is not a **Refund** with **Refund Status** `failed`; `failed` belongs to refund processing after a Refund exists.
 - Creating a **Refund** is a Merchant action; Administrator refund access is for monitoring and inspection, not initiation.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
@@ -139,6 +144,8 @@ _Avoid_: System user, service account
 - Domain expert: "No. A Payment Processing Outcome is decided by the System Principal, not by Payment Metadata."
 - Dev: "Is this payment refunded?"
 - Domain expert: "Only when the full original amount has been refunded."
+- Dev: "The merchant tried to refund a pending payment. Is that a failed refund?"
+- Domain expert: "No. That is a Rejected Refund Attempt because no Refund exists yet."
 - Dev: "Can this actor see every payment?"
 - Domain expert: "Only if the actor is an Administrator. A Merchant sees Payments for its own Merchant Account."
 - Dev: "Who is recorded when authentication fails before we know the party?"

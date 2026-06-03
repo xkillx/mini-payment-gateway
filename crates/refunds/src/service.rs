@@ -41,6 +41,43 @@ async fn record_domain_event_in_tx(
     Ok(event_id)
 }
 
+async fn record_rejected_refund_attempt_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    cmd: &CreateRefundCommand,
+    rejection_code: &str,
+    rejection_reason: &str,
+    context: Option<serde_json::Value>,
+) -> Result<(), AuditError> {
+    let now = Utc::now();
+    let mut details = json!({
+        "merchant_id": cmd.merchant_id.to_string(),
+        "payment_id": cmd.payment_id.to_string(),
+        "idempotency_key": cmd.idempotency_key,
+        "rejection_code": rejection_code,
+        "rejection_reason": rejection_reason,
+    });
+    if let Some(ctx) = context {
+        if let Some(obj) = details.as_object_mut() {
+            for (k, v) in ctx.as_object().into_iter().flat_map(|o| o.iter()) {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    let audit_record = NewAuditRecord {
+        id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+        actor_id: Some(cmd.actor_id),
+        actor_type: ActorType::MERCHANT.into(),
+        action: actions::REFUND_REJECTED.into(),
+        resource_type: "payment".into(),
+        resource_id: cmd.payment_id.to_string(),
+        details: Some(details),
+        occurred_at: now,
+        created_at: now,
+    };
+    record_required_in_tx(tx, audit_record).await?;
+    Ok(())
+}
+
 pub trait RefundService: Send + Sync {
     async fn get_refund(&self, id: Uuid) -> Result<Option<Refund>, sqlx::Error>;
     async fn list_merchant_refunds(&self, merchant_id: Uuid) -> Result<Vec<Refund>, sqlx::Error>;
@@ -120,7 +157,17 @@ pub async fn create_refund(
             tx.commit().await?;
             return Ok(CreateRefundOutcome::Replayed(existing.clone()));
         } else {
-            drop(tx);
+            record_rejected_refund_attempt_in_tx(
+                &mut tx,
+                &cmd,
+                "idempotency_key_conflict",
+                "Idempotency key replay with different parameters",
+                Some(json!({
+                    "existing_payment_id": existing.payment_id.to_string(),
+                })),
+            )
+            .await?;
+            tx.commit().await?;
             return Err(CreateRefundError::Conflict(
                 "Idempotency key replay with different parameters".into(),
             ));
@@ -133,24 +180,53 @@ pub async fn create_refund(
     let payment = match payment {
         Some(p) => p,
         None => {
-            drop(tx);
+            record_rejected_refund_attempt_in_tx(
+                &mut tx,
+                &cmd,
+                "payment_not_found",
+                "Payment not found",
+                None,
+            )
+            .await?;
+            tx.commit().await?;
             return Err(CreateRefundError::NotFound);
         }
     };
 
     if payment.status != "successful" {
-        drop(tx);
-        return Err(CreateRefundError::InvalidPaymentState(format!(
+        let rejection_reason = format!(
             "payment status is {}; only successful payments can be refunded",
             payment.status
-        )));
+        );
+        record_rejected_refund_attempt_in_tx(
+            &mut tx,
+            &cmd,
+            "invalid_payment_status",
+            &rejection_reason,
+            Some(json!({
+                "payment_status": payment.status,
+            })),
+        )
+        .await?;
+        tx.commit().await?;
+        return Err(CreateRefundError::InvalidPaymentState(rejection_reason));
     }
 
     let existing_by_payment =
         repository::find_refund_by_payment_id_in_tx(&mut tx, cmd.payment_id).await?;
 
-    if existing_by_payment.is_some() {
-        drop(tx);
+    if let Some(ref existing) = existing_by_payment {
+        record_rejected_refund_attempt_in_tx(
+            &mut tx,
+            &cmd,
+            "duplicate_refund",
+            "Payment already has a refund",
+            Some(json!({
+                "existing_refund_id": existing.id.to_string(),
+            })),
+        )
+        .await?;
+        tx.commit().await?;
         return Err(CreateRefundError::DuplicateRefund(
             "Payment already has a refund".into(),
         ));
@@ -181,22 +257,53 @@ pub async fn create_refund(
                 cmd.merchant_id,
                 &cmd.idempotency_key,
             )
-            .await?
-            .ok_or_else(|| {
-                CreateRefundError::Conflict(
-                    "Idempotency key conflict but no existing refund found".into(),
-                )
-            })?;
+            .await?;
 
-            if existing.payment_id == cmd.payment_id {
+            if let Some(existing) = existing {
+                if existing.payment_id == cmd.payment_id {
+                    tx.commit().await?;
+                    return Ok(CreateRefundOutcome::Replayed(existing));
+                }
+
+                record_rejected_refund_attempt_in_tx(
+                    &mut tx,
+                    &cmd,
+                    "idempotency_key_conflict",
+                    "Idempotency key replay with different parameters",
+                    Some(json!({
+                        "existing_payment_id": existing.payment_id.to_string(),
+                    })),
+                )
+                .await?;
                 tx.commit().await?;
-                return Ok(CreateRefundOutcome::Replayed(existing));
-            } else {
-                drop(tx);
                 return Err(CreateRefundError::Conflict(
                     "Idempotency key replay with different parameters".into(),
                 ));
             }
+
+            let by_payment =
+                repository::find_refund_by_payment_id_in_tx(&mut tx, cmd.payment_id).await?;
+
+            if let Some(existing) = by_payment {
+                record_rejected_refund_attempt_in_tx(
+                    &mut tx,
+                    &cmd,
+                    "duplicate_refund",
+                    "Payment already has a refund",
+                    Some(json!({
+                        "existing_refund_id": existing.id.to_string(),
+                    })),
+                )
+                .await?;
+                tx.commit().await?;
+                return Err(CreateRefundError::DuplicateRefund(
+                    "Payment already has a refund".into(),
+                ));
+            }
+
+            return Err(CreateRefundError::Database(
+                "Insert conflict but no matching refund found".into(),
+            ));
         }
     };
 

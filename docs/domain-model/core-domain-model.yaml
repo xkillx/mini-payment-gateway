@@ -434,7 +434,7 @@ commands:
     idempotency_required: true
     preconditions:
       - "Payment status is successful"
-      - "No completed refund exists for this payment"
+      - "No Refund exists for this payment"
     output: "Refund entity with status pending"
     conflict: "Return existing refund record without side effects"
     events_emitted:

@@ -133,7 +133,7 @@ pub async fn insert_refund_in_tx(
         r#"
         INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (merchant_id, idempotency_key) DO NOTHING
+        ON CONFLICT DO NOTHING
         RETURNING *
         "#,
     )

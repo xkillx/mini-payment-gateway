@@ -81,6 +81,49 @@ fn new_idempotency_key() -> String {
     format!("test-key-{}", new_uuid_v7())
 }
 
+async fn get_rejected_audit(
+    pool: &PgPool,
+    payment_id: Uuid,
+) -> Vec<(String, Option<String>, String, serde_json::Value)> {
+    sqlx::query_as(
+        r#"SELECT action, actor_id::text, actor_type, details
+           FROM audit_records
+           WHERE action = 'refund.rejected'
+             AND resource_type = 'payment'
+             AND resource_id = $1
+           ORDER BY created_at"#,
+    )
+    .bind(payment_id.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn count_rejected_audit(pool: &PgPool, payment_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_records
+           WHERE action = 'refund.rejected'
+             AND resource_type = 'payment'
+             AND resource_id = $1"#,
+    )
+    .bind(payment_id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn count_refund_domain_events_for_payment(pool: &PgPool, payment_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM domain_events
+           WHERE aggregate_type = 'refund'
+           AND payload->>'payment_id' = $1"#,
+    )
+    .bind(payment_id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn send_request(
     app: &mut Router,
     method: axum::http::Method,
@@ -409,6 +452,9 @@ async fn create_refund_replay_returns_200_without_side_effects() {
             .await
             .unwrap();
     assert_eq!(event_count_after, event_count_before);
+
+    let rejected_count: i64 = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
@@ -453,6 +499,17 @@ async fn same_idempotency_key_different_payment_returns_409() {
             .await
             .unwrap();
     assert_eq!(refund_b_count, 0);
+
+    let rejected = get_rejected_audit(&pool, payment_b).await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].0, "refund.rejected");
+    assert_eq!(rejected[0].1.as_deref(), Some(MERCHANT_ACTOR_ID));
+    assert_eq!(rejected[0].2, "merchant");
+    assert_eq!(rejected[0].3["rejection_code"], "idempotency_key_conflict");
+    assert_eq!(rejected[0].3["existing_payment_id"], payment_a.to_string());
+
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_a).await, 1);
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_b).await, 0);
 }
 
 #[tokio::test]
@@ -495,6 +552,21 @@ async fn same_payment_different_idempotency_key_returns_409() {
             .await
             .unwrap();
     assert_eq!(refund_count, 1);
+
+    let rejected = get_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].0, "refund.rejected");
+    assert_eq!(rejected[0].3["rejection_code"], "duplicate_refund");
+    assert_eq!(
+        rejected[0].3["rejection_reason"],
+        "Payment already has a refund"
+    );
+    assert!(!rejected[0].3["existing_refund_id"]
+        .as_str()
+        .unwrap()
+        .is_empty());
+
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 1);
 }
 
 #[tokio::test]
@@ -533,11 +605,36 @@ async fn refund_wrong_merchant_payment_returns_404() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+
+    let rejected = get_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].0, "refund.rejected");
+    assert_eq!(rejected[0].3["rejection_code"], "payment_not_found");
+    assert_eq!(rejected[0].3["rejection_reason"], "Payment not found");
 }
 
 #[tokio::test]
-async fn refund_missing_payment_returns_404() {
+async fn refund_wrong_merchant_payment_no_domain_event() {
     let pool = setup_db().await;
+
+    let merchant2_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM actors WHERE id = '10000000-0000-0000-0000-000000000001')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    if !merchant2_exists {
+        sqlx::query(
+            "INSERT INTO actors (id, name, email, role, merchant_id, is_active) VALUES ($1, 'merchant2', 'merchant2@test.invalid', 'merchant', $2, true)",
+        )
+        .bind(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
+        .bind(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let payment_id = create_successful_payment_for_merchant(&pool, &merchant2_token()).await;
 
     let mut app = build_app(pool.clone()).await;
     let (status, _) = send_request(
@@ -547,11 +644,40 @@ async fn refund_missing_payment_returns_404() {
         &merchant_token(),
         Some(&new_idempotency_key()),
         Some(json!({
-            "payment_id": Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
+            "payment_id": payment_id.to_string()
         })),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 0);
+}
+
+#[tokio::test]
+async fn refund_missing_payment_returns_404() {
+    let pool = setup_db().await;
+    let payment_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({
+            "payment_id": payment_id.to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+
+    let rejected = get_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].0, "refund.rejected");
+    assert_eq!(rejected[0].3["rejection_code"], "payment_not_found");
+
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 0);
 }
 
 #[tokio::test]
@@ -593,11 +719,21 @@ async fn refund_non_successful_payment_returns_409() {
         .as_str()
         .unwrap()
         .contains("only successful payments can be refunded"));
+
+    let payment_uuid = Uuid::parse_str(payment_id).unwrap();
+    let rejected = get_rejected_audit(&pool, payment_uuid).await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].0, "refund.rejected");
+    assert_eq!(rejected[0].3["rejection_code"], "invalid_payment_status");
+    assert_eq!(rejected[0].3["payment_status"], "pending");
+
+    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_uuid).await, 0);
 }
 
 #[tokio::test]
 async fn admin_cannot_create_refund_returns_403() {
     let pool = setup_db().await;
+    let payment_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
 
     let mut app = build_app(pool.clone()).await;
     let (status, _) = send_request(
@@ -607,11 +743,14 @@ async fn admin_cannot_create_refund_returns_403() {
         &admin_token(),
         Some(&new_idempotency_key()),
         Some(json!({
-            "payment_id": Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
+            "payment_id": payment_id.to_string()
         })),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+
+    let rejected_count = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
@@ -632,6 +771,9 @@ async fn missing_idempotency_key_returns_422() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+
+    let rejected_count = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
@@ -653,6 +795,9 @@ async fn unknown_body_field_returns_422() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+
+    let rejected_count = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
@@ -674,11 +819,15 @@ async fn refund_currency_unknown_field_returns_422() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+
+    let rejected_count = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
 async fn missing_auth_returns_401() {
     let pool = setup_db().await;
+    let payment_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
 
     let app = build_app(pool.clone()).await;
     let builder = Request::builder()
@@ -688,13 +837,16 @@ async fn missing_auth_returns_401() {
         .header("Idempotency-Key", new_idempotency_key());
 
     let payload = json!({
-        "payment_id": Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string()
+        "payment_id": payment_id.to_string()
     });
     let req = builder
         .body(Body::from(serde_json::to_vec(&payload).unwrap()))
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+    let rejected_count = count_rejected_audit(&pool, payment_id).await;
+    assert_eq!(rejected_count, 0);
 }
 
 #[tokio::test]
@@ -732,4 +884,53 @@ async fn list_refunds_returns_not_implemented() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_IMPLEMENTED);
+}
+
+#[tokio::test]
+async fn direct_sql_duplicate_payment_id_refund_fails_on_unique_index() {
+    let pool = setup_db().await;
+    let payment_id = create_successful_payment(&pool).await;
+
+    let refund_id_1 = new_uuid_v7();
+    let refund_id_2 = new_uuid_v7();
+    let now = chrono::Utc::now();
+    let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+    let key1 = new_idempotency_key();
+    let key2 = new_idempotency_key();
+
+    sqlx::query(
+        r#"INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)"#,
+    )
+    .bind(refund_id_1)
+    .bind(payment_id)
+    .bind(merchant_uuid)
+    .bind(1000_i64)
+    .bind("USD")
+    .bind(&key1)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let result = sqlx::query(
+        r#"INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)"#,
+    )
+    .bind(refund_id_2)
+    .bind(payment_id)
+    .bind(merchant_uuid)
+    .bind(1000_i64)
+    .bind("USD")
+    .bind(&key2)
+    .bind(now)
+    .bind(now)
+    .execute(&pool)
+    .await;
+
+    assert!(
+        result.is_err(),
+        "second direct INSERT for same payment_id must fail on unique index"
+    );
 }
