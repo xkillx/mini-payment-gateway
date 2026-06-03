@@ -11,5 +11,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 sqlx = { workspace = true }
+validator = { workspace = true }
+tracing = { workspace = true }
 shared-auth = { path = "../shared-auth" }
 shared-http = { path = "../shared-http" }
+audit = { path = "../audit" }

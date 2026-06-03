@@ -157,7 +157,7 @@ Transitions: reconciliation records are created with a final status; no lifecycl
 
 - **I-1:** A Payment belongs to exactly one merchant (`payment.merchant_id`).
 - **I-2:** A Refund belongs to exactly one Payment; ownership is derived from the linked payment.
-- **I-3:** At most one completed Refund per Payment in MVP scope.
+- **I-3:** At most one Refund record per Payment in MVP scope.
 - **I-4:** A Refund can only be created against a Payment with status `successful`.
 - **I-5:** The refund amount must equal the original payment amount in MVP (full refund only).
 - **I-6:** A Payment transitions to `refunded` only after a Refund reaches `completed`.
@@ -187,7 +187,7 @@ Transitions: reconciliation records are created with a final status; no lifecycl
 4. System processes refund, encounters error. Status: `failed` (refund); `failure_reason` recorded.
 5. Payment status remains `successful`.
 
-**Outcome:** Payment stays `successful`. Merchant may retry refund (new refund request).
+**Outcome:** Payment stays `successful`. Failed-refund retry is future scope and must not create a second Refund record in MVP.
 
 #### Scenario C: Duplicate Create Payment with Same Idempotency Key
 
@@ -292,7 +292,7 @@ Externally delivered domain event types trigger creation of a Notification Deliv
 | Aspect | Detail |
 |---|---|
 | **Idempotency key required** | Yes |
-| **Preconditions** | Payment status is `successful`; no completed refund exists for this payment |
+| **Preconditions** | Payment status is `successful`; no Refund exists for the Payment |
 | **Output** | Refund entity with status `pending` |
 | **Conflict (duplicate key)** | Return existing refund record without side effects |
 | **Events emitted** | `refund.created` |

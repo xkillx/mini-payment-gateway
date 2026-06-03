@@ -308,7 +308,7 @@ invariants:
   - id: I-2
     rule: "A Refund belongs to exactly one Payment; ownership is derived from the linked payment"
   - id: I-3
-    rule: "At most one completed Refund per Payment in MVP scope"
+    rule: "At most one Refund record per Payment in MVP scope"
   - id: I-4
     rule: "A Refund can only be created against a Payment with status successful"
   - id: I-5

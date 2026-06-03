@@ -32,7 +32,7 @@ pub fn build(state: AppState) -> Router {
     ));
     let payments = role_guard(payments, merchant_or_admin.clone());
 
-    let refunds = merchant_scoped_guard(refunds::routes::routes());
+    let refunds = merchant_scoped_guard(refunds::routes::routes(state.pool.clone()));
     let refunds = role_guard(refunds, merchant_or_admin);
 
     let admin_routes = role_guard(admin::routes::routes(), admin_only.clone());

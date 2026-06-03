@@ -109,13 +109,17 @@ _Avoid_: System user, service account
 - "Transaction" was used interchangeably with "Payment" in planning docs; use **Payment** as the canonical term unless referring to external processor records in future scope.
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
 - "Transaction history" in planning docs means **Payment Status History** when discussing a Payment's lifecycle statuses.
+- "Completed payment" in planning docs means a **Payment** with **Payment Status** `successful`; Payment does not have a `completed` status.
 - "Payment metadata" in planning docs means **Payment Metadata**, not a separate Payment Request object or mutable lifecycle details. Payment Metadata is part of the create command identified by an **Idempotency Key**.
 - A **Payment Processing Outcome** is decided by the **System Principal**; do not infer it from **Payment Metadata**.
 - An **Idempotency Key** identifies a create command from the Merchant; it is not the Payment identifier and does not replace the Actor or Merchant Account identity.
 - **Configured Currency** is a gateway-level MVP constraint; Payments in any other currency are rejected rather than converted.
 - "Amount" in planning docs means **Payment Amount** in minor units; decimal or display-form money is not accepted at the command boundary.
 - MVP uses full refunds only; "partial refund" is future scope and must not be implied by "refunded".
-- MVP refund behavior is one full Refund per successful Payment; multiple or partial refunds are future scope.
+- MVP refund behavior is one Refund record per successful Payment; retrying after a failed Refund and multiple or partial refunds are future scope.
+- "Refund request" in planning docs means the Merchant action that creates a **Refund**; do not introduce a separate Refund Request domain object.
+- "Refund requested" in planning docs and legacy code means the **Refund** was created; use **refund.created** for the action and Domain Event name.
+- Creating a **Refund** is a Merchant action; Administrator refund access is for monitoring and inspection, not initiation.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
 - Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.

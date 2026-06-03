@@ -56,6 +56,7 @@ pub mod actions {
     pub const PAYMENT_SUCCESSFUL: &str = "payment.successful";
     pub const PAYMENT_FAILED: &str = "payment.failed";
     pub const REFUND_REQUESTED: &str = "refund.requested";
+    pub const REFUND_CREATED: &str = "refund.created";
     pub const REFUND_COMPLETED: &str = "refund.completed";
     pub const RECONCILIATION_EXECUTED: &str = "reconciliation.executed";
 }

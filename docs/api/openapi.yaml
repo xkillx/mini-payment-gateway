@@ -196,13 +196,46 @@ paths:
       summary: Create a refund (Merchant only)
       security:
         - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: Unique key for idempotent refund creation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequest"
       responses:
+        "201":
+          description: Refund created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundResponse"
+        "200":
+          description: Idempotent replay — same refund returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/refunds/{id}:
     get:
@@ -581,6 +614,53 @@ components:
           type: string
           format: date-time
           description: When the Payment was last updated
+
+    CreateRefundRequest:
+      type: object
+      required:
+        - payment_id
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+          description: ID of the Payment to refund
+      additionalProperties: false
+
+    RefundResponse:
+      type: object
+      required:
+        - id
+        - payment_id
+        - amount_minor
+        - currency
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Refund ID
+        payment_id:
+          type: string
+          format: uuid
+          description: Owning Payment ID
+        amount_minor:
+          type: integer
+          description: Refund amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/RefundStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: When the Refund was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Refund was last updated
 
     PaymentListItemResponse:
       type: object
