@@ -349,3 +349,70 @@ pub async fn create_refund(
     tx.commit().await?;
     Ok(CreateRefundOutcome::Created(created))
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum ListRefundsError {
+    #[error("Database error: {0}")]
+    Database(String),
+}
+
+impl From<sqlx::Error> for ListRefundsError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+pub async fn list_refunds(
+    pool: &PgPool,
+    filter: crate::models::RefundListFilter,
+) -> Result<crate::models::RefundListResponse, ListRefundsError> {
+    use crate::models::{RefundListResponse, RefundReadResponse};
+    use crate::repository::{PostgresRefundRepository, RefundRepository};
+
+    let repo = PostgresRefundRepository::new(pool.clone());
+    let rows = repo.list(&filter).await?;
+    let limit = filter.limit;
+    let offset = filter.offset;
+    Ok(RefundListResponse {
+        items: rows.into_iter().map(RefundReadResponse::from).collect(),
+        limit,
+        offset,
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GetRefundDetailError {
+    #[error("Refund not found")]
+    NotFound,
+    #[error("Database error: {0}")]
+    Database(String),
+}
+
+impl From<sqlx::Error> for GetRefundDetailError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+pub async fn get_refund_detail(
+    pool: &PgPool,
+    refund_id: Uuid,
+    viewer_merchant_id: Option<Uuid>,
+) -> Result<crate::models::RefundReadResponse, GetRefundDetailError> {
+    use crate::models::RefundReadResponse;
+    use crate::repository::{PostgresRefundRepository, RefundRepository};
+
+    let repo = PostgresRefundRepository::new(pool.clone());
+    let refund = repo
+        .find_by_id(refund_id)
+        .await?
+        .ok_or(GetRefundDetailError::NotFound)?;
+
+    if let Some(merchant_id) = viewer_merchant_id {
+        if refund.merchant_id != merchant_id {
+            return Err(GetRefundDetailError::NotFound);
+        }
+    }
+
+    Ok(RefundReadResponse::from(refund))
+}

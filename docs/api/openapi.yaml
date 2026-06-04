@@ -182,15 +182,63 @@ paths:
     get:
       operationId: listRefunds
       summary: List refunds (Merchant or Administrator)
+      description: |
+        Returns a paginated list of Refunds ordered by `created_at DESC, id DESC`.
+
+        - Merchants always see only Refunds owned by their own Merchant Account.
+        - Administrators see all Refunds unless `merchant_id` is supplied to filter to one Merchant Account.
+        - Merchants that supply `merchant_id` receive `403` (forbidden), even if the value is malformed.
+        - Read status is the Refund Status; no separate outcome field exists.
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of items to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of items to skip
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RefundStatus"
+          description: Filter by exact Refund Status
+        - name: merchant_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: |
+            Administrator-only filter to scope the list to a single Merchant Account.
+            Merchants that supply this parameter receive `403`.
       responses:
+        "200":
+          description: Paginated list of Refunds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createRefund
       summary: Create a refund (Merchant only)
@@ -241,6 +289,13 @@ paths:
     get:
       operationId: getRefund
       summary: Get a refund by ID (Merchant or Administrator)
+      description: |
+        Returns the Refund detail for a single Refund, including the Refund Status.
+
+        Merchants may only view Refunds owned by their own Merchant Account; access to any
+        other Refund returns `404`. Administrators may view any Refund.
+
+        Read status is the Refund Status; no separate outcome field exists.
       security:
         - bearerAuth: []
       parameters:
@@ -251,12 +306,20 @@ paths:
             type: string
             format: uuid
       responses:
+        "200":
+          description: Refund detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundReadResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/notifications:
     get:
@@ -661,6 +724,65 @@ components:
           type: string
           format: date-time
           description: When the Refund was last updated
+
+    RefundReadResponse:
+      type: object
+      required:
+        - id
+        - payment_id
+        - merchant_id
+        - amount_minor
+        - currency
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Refund ID
+        payment_id:
+          type: string
+          format: uuid
+          description: Owning Payment ID
+        merchant_id:
+          type: string
+          format: uuid
+          description: Owning Merchant Account ID
+        amount_minor:
+          type: integer
+          description: Refund amount in minor units
+        currency:
+          type: string
+          description: ISO 4217 currency code
+        status:
+          $ref: "#/components/schemas/RefundStatus"
+        created_at:
+          type: string
+          format: date-time
+          description: When the Refund was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the Refund was last updated
+
+    RefundListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundReadResponse"
+        limit:
+          type: integer
+          description: Maximum number of items returned
+        offset:
+          type: integer
+          description: Number of items skipped
 
     PaymentListItemResponse:
       type: object

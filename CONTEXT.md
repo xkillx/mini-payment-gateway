@@ -124,6 +124,7 @@ _Avoid_: System user, service account
 - "Refund request" in planning docs means the Merchant action that creates a **Refund**; do not introduce a separate Refund Request domain object.
 - "Refund requested" in planning docs and legacy code means the **Refund** was created; use **refund.created** for the action and Domain Event name.
 - A **Rejected Refund Attempt** is not a **Refund** with **Refund Status** `failed`; `failed` belongs to refund processing after a Refund exists.
+- "Refund outcome" in refund history planning means **Refund Status**; do not introduce a separate Refund Outcome concept for MVP.
 - Creating a **Refund** is a Merchant action; Administrator refund access is for monitoring and inspection, not initiation.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.

@@ -1,13 +1,14 @@
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use uuid::Uuid;
 
-use crate::models::Refund;
+use crate::models::{Refund, RefundListFilter};
 
 pub trait RefundRepository: Send + Sync {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Refund>, sqlx::Error>;
     async fn find_by_merchant(&self, merchant_id: Uuid) -> Result<Vec<Refund>, sqlx::Error>;
     async fn insert(&self, refund: &Refund) -> Result<Refund, sqlx::Error>;
     async fn update_status(&self, id: Uuid, status: &str) -> Result<Refund, sqlx::Error>;
+    async fn list(&self, filter: &RefundListFilter) -> Result<Vec<Refund>, sqlx::Error>;
 }
 
 pub struct PostgresRefundRepository {
@@ -70,6 +71,24 @@ impl RefundRepository for PostgresRefundRepository {
         .bind(status)
         .fetch_one(&self.pool)
         .await
+    }
+
+    async fn list(&self, filter: &RefundListFilter) -> Result<Vec<Refund>, sqlx::Error> {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM refunds WHERE 1=1");
+
+        if let Some(merchant_id) = filter.merchant_id {
+            qb.push(" AND merchant_id = ").push_bind(merchant_id);
+        }
+
+        if let Some(status) = &filter.status {
+            qb.push(" AND status = ").push_bind(status.clone());
+        }
+
+        qb.push(" ORDER BY created_at DESC, id DESC LIMIT ")
+            .push_bind(filter.limit);
+        qb.push(" OFFSET ").push_bind(filter.offset);
+
+        qb.build_query_as::<Refund>().fetch_all(&self.pool).await
     }
 }
 

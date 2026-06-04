@@ -508,8 +508,14 @@ async fn same_idempotency_key_different_payment_returns_409() {
     assert_eq!(rejected[0].3["rejection_code"], "idempotency_key_conflict");
     assert_eq!(rejected[0].3["existing_payment_id"], payment_a.to_string());
 
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_a).await, 1);
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_b).await, 0);
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_a).await,
+        1
+    );
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_b).await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -566,7 +572,10 @@ async fn same_payment_different_idempotency_key_returns_409() {
         .unwrap()
         .is_empty());
 
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 1);
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_id).await,
+        1
+    );
 }
 
 #[tokio::test]
@@ -650,7 +659,10 @@ async fn refund_wrong_merchant_payment_no_domain_event() {
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
 
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 0);
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_id).await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -677,7 +689,10 @@ async fn refund_missing_payment_returns_404() {
     assert_eq!(rejected[0].0, "refund.rejected");
     assert_eq!(rejected[0].3["rejection_code"], "payment_not_found");
 
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_id).await, 0);
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_id).await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -727,7 +742,10 @@ async fn refund_non_successful_payment_returns_409() {
     assert_eq!(rejected[0].3["rejection_code"], "invalid_payment_status");
     assert_eq!(rejected[0].3["payment_status"], "pending");
 
-    assert_eq!(count_refund_domain_events_for_payment(&pool, payment_uuid).await, 0);
+    assert_eq!(
+        count_refund_domain_events_for_payment(&pool, payment_uuid).await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -849,32 +867,69 @@ async fn missing_auth_returns_401() {
     assert_eq!(rejected_count, 0);
 }
 
-#[tokio::test]
-async fn get_refund_returns_not_implemented() {
-    let pool = setup_db().await;
+async fn ensure_merchant2_actor(pool: &PgPool) {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM actors WHERE id = '10000000-0000-0000-0000-000000000001')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    if !exists {
+        sqlx::query(
+            "INSERT INTO actors (id, name, email, role, merchant_id, is_active) VALUES ($1, 'merchant2', 'merchant2@test.invalid', 'merchant', $2, true)",
+        )
+        .bind(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
+        .bind(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
 
+async fn _create_refund(pool: &PgPool, token: &str) -> (Uuid, Uuid, serde_json::Value) {
+    let payment_id = create_successful_payment_for_merchant(pool, token).await;
     let mut app = build_app(pool.clone()).await;
-    let (status, _) = send_request(
+    let idem_key = new_idempotency_key();
+
+    let (status, body) = send_request(
         &mut app,
-        axum::http::Method::GET,
-        &format!(
-            "/api/v1/refunds/{}",
-            Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext))
-        ),
-        &merchant_token(),
-        None,
-        None,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        token,
+        Some(&idem_key),
+        Some(json!({
+            "payment_id": payment_id.to_string()
+        })),
     )
     .await;
-    assert_eq!(status, axum::http::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let refund_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    (refund_id, payment_id, body)
 }
 
 #[tokio::test]
-async fn list_refunds_returns_not_implemented() {
+async fn merchant_list_refunds_returns_own_refunds() {
     let pool = setup_db().await;
 
+    let payment_id = create_successful_payment(&pool).await;
     let mut app = build_app(pool.clone()).await;
-    let (status, _) = send_request(
+
+    let idem_key = new_idempotency_key();
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&idem_key),
+        Some(json!({
+            "payment_id": payment_id.to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let refund_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, list_body) = send_request(
         &mut app,
         axum::http::Method::GET,
         "/api/v1/refunds",
@@ -883,7 +938,468 @@ async fn list_refunds_returns_not_implemented() {
         None,
     )
     .await;
-    assert_eq!(status, axum::http::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(list_body["limit"], 50);
+    assert_eq!(list_body["offset"], 0);
+    assert!(list_body["items"].is_array());
+
+    let items = list_body["items"].as_array().unwrap();
+    let found = items.iter().any(|item| item["id"] == refund_id);
+    assert!(found, "merchant list should include own refund");
+
+    let refund_item = items.iter().find(|item| item["id"] == refund_id).unwrap();
+    assert_eq!(refund_item["payment_id"], payment_id.to_string());
+    assert_eq!(refund_item["amount_minor"], 1000);
+    assert_eq!(refund_item["currency"], "USD");
+    assert_eq!(refund_item["status"], "pending");
+    assert!(refund_item["merchant_id"].is_string());
+    assert!(refund_item.get("idempotency_key").is_none());
+    assert!(refund_item.get("created_at").is_some());
+    assert!(refund_item.get("updated_at").is_some());
+}
+
+#[tokio::test]
+async fn admin_list_refunds_returns_refunds_across_merchants() {
+    let pool = setup_db().await;
+    ensure_merchant2_actor(&pool).await;
+
+    let payment1_id = create_successful_payment(&pool).await;
+    let payment2_id = create_successful_payment_for_merchant(&pool, &merchant2_token()).await;
+
+    let mut app1 = build_app(pool.clone()).await;
+    let idem_key1 = new_idempotency_key();
+    let (s1, _b1) = send_request(
+        &mut app1,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&idem_key1),
+        Some(json!({"payment_id": payment1_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s1, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let idem_key2 = new_idempotency_key();
+    let (s2, b2) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant2_token(),
+        Some(&idem_key2),
+        Some(json!({"payment_id": payment2_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s2, axum::http::StatusCode::CREATED);
+    let _merchant2_refund_id = b2["id"].as_str().unwrap().to_string();
+}
+#[tokio::test]
+async fn admin_list_refunds_filters_by_merchant_id() {
+    let pool = setup_db().await;
+    ensure_merchant2_actor(&pool).await;
+
+    let payment1_id = create_successful_payment(&pool).await;
+    let payment2_id = create_successful_payment_for_merchant(&pool, &merchant2_token()).await;
+
+    let mut app1 = build_app(pool.clone()).await;
+    let (s1, _b1) = send_request(
+        &mut app1,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment1_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s1, axum::http::StatusCode::CREATED);
+
+    let mut app2 = build_app(pool.clone()).await;
+    let idem_key2 = new_idempotency_key();
+    let (s2, b2) = send_request(
+        &mut app2,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant2_token(),
+        Some(&idem_key2),
+        Some(json!({"payment_id": payment2_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s2, axum::http::StatusCode::CREATED);
+    let _merchant2_refund_id = b2["id"].as_str().unwrap().to_string();
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, list_body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds?merchant_id={}", MERCHANT_ACTOR_ID),
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    for item in items.iter() {
+        assert_eq!(
+            item["merchant_id"], MERCHANT_ACTOR_ID,
+            "filtered list should only contain merchant1 refunds"
+        );
+    }
+}
+
+#[tokio::test]
+async fn merchant_list_with_merchant_id_returns_403() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/refunds?merchant_id=00000000-0000-0000-0000-000000000001",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn merchant_list_with_malformed_merchant_id_returns_403() {
+    let pool = setup_db().await;
+
+    let mut app = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/refunds?merchant_id=not-a-uuid",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn list_refunds_pagination_orders_newest_first_and_respects_limit_offset() {
+    let pool = setup_db().await;
+
+    let payment_id1 = create_successful_payment(&pool).await;
+    let payment_id2 = create_successful_payment(&pool).await;
+
+    let mut app = build_app(pool.clone()).await;
+    let mut refund_ids = Vec::new();
+
+    for (_idx, payment_id) in [payment_id1, payment_id2].iter().enumerate() {
+        let (s, b) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            "/api/v1/refunds",
+            &merchant_token(),
+            Some(&new_idempotency_key()),
+            Some(json!({"payment_id": payment_id.to_string()})),
+        )
+        .await;
+        assert_eq!(s, axum::http::StatusCode::CREATED);
+        refund_ids.push(b["id"].as_str().unwrap().to_string());
+    }
+
+    sqlx::query("UPDATE refunds SET created_at = $1 WHERE id = $2")
+        .bind(chrono::Utc::now() - chrono::Duration::seconds(60))
+        .bind(Uuid::parse_str(&refund_ids[0]).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE refunds SET created_at = $1 WHERE id = $2")
+        .bind(chrono::Utc::now())
+        .bind(Uuid::parse_str(&refund_ids[1]).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, list_body) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        "/api/v1/refunds?limit=50&offset=0",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+
+    let refund_positions: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| refund_ids.contains(&item["id"].as_str().unwrap().to_string()))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        refund_positions[0] < refund_positions[1],
+        "newer refund should come before older refund in sorted output"
+    );
+}
+
+#[tokio::test]
+async fn list_refunds_status_filter_returns_matching_status() {
+    let pool = setup_db().await;
+
+    let payment_id = create_successful_payment(&pool).await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (s, b) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s, axum::http::StatusCode::CREATED);
+    let refund_id = b["id"].as_str().unwrap().to_string();
+    let refund_uuid = Uuid::parse_str(&refund_id).unwrap();
+
+    sqlx::query("UPDATE refunds SET status = 'completed', updated_at = NOW() WHERE id = $1")
+        .bind(refund_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, list_body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/refunds?status=completed",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = list_body["items"].as_array().unwrap();
+    for item in items.iter() {
+        assert_eq!(
+            item["status"], "completed",
+            "status filter should only return completed refunds"
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_refunds_invalid_limit_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    for limit in &["0", "201", "abc"] {
+        let (status, _) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            &format!("/api/v1/refunds?limit={limit}"),
+            &merchant_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}
+
+#[tokio::test]
+async fn list_refunds_invalid_offset_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/refunds?offset=-1",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn list_refunds_invalid_status_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/refunds?status=unknown",
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn merchant_get_refund_detail_returns_200() {
+    let pool = setup_db().await;
+
+    let payment_id = create_successful_payment(&pool).await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (s, b) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s, axum::http::StatusCode::CREATED);
+    let refund_id = b["id"].as_str().unwrap().to_string();
+
+    let (status, detail) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds/{refund_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(detail["id"], refund_id);
+    assert_eq!(detail["payment_id"], payment_id.to_string());
+    assert_eq!(detail["amount_minor"], 1000);
+    assert_eq!(detail["currency"], "USD");
+    assert_eq!(detail["status"], "pending");
+    assert_eq!(detail["merchant_id"], MERCHANT_ACTOR_ID);
+    assert!(detail.get("idempotency_key").is_none());
+    assert!(detail.get("created_at").is_some());
+    assert!(detail.get("updated_at").is_some());
+}
+
+#[tokio::test]
+async fn admin_get_refund_detail_returns_200() {
+    let pool = setup_db().await;
+
+    let payment_id = create_successful_payment(&pool).await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (s, b) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s, axum::http::StatusCode::CREATED);
+    let refund_id = b["id"].as_str().unwrap().to_string();
+
+    let (status, detail) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds/{refund_id}"),
+        &admin_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(detail["id"], refund_id);
+    assert_eq!(detail["merchant_id"], MERCHANT_ACTOR_ID);
+}
+
+#[tokio::test]
+async fn merchant_get_refund_detail_other_merchant_returns_404() {
+    let pool = setup_db().await;
+    ensure_merchant2_actor(&pool).await;
+
+    let payment_id = create_successful_payment_for_merchant(&pool, &merchant2_token()).await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (s, b) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant2_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s, axum::http::StatusCode::CREATED);
+    let refund_id = b["id"].as_str().unwrap().to_string();
+
+    let mut app2 = build_app(pool.clone()).await;
+    let (status, _) = send_request(
+        &mut app2,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds/{refund_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_refund_missing_id_returns_404() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let missing_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+    let (status, _) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds/{missing_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn refund_detail_response_includes_merchant_id_and_excludes_idempotency_key() {
+    let pool = setup_db().await;
+
+    let payment_id = create_successful_payment(&pool).await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (s, b) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/refunds",
+        &merchant_token(),
+        Some(&new_idempotency_key()),
+        Some(json!({"payment_id": payment_id.to_string()})),
+    )
+    .await;
+    assert_eq!(s, axum::http::StatusCode::CREATED);
+    let refund_id = b["id"].as_str().unwrap().to_string();
+
+    let (status, detail) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/refunds/{refund_id}"),
+        &merchant_token(),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(detail.get("merchant_id").is_some());
+    assert!(detail.get("idempotency_key").is_none());
+    assert!(
+        detail.get("status").is_some(),
+        "read status is the Refund Status"
+    );
 }
 
 #[tokio::test]
