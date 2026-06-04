@@ -64,6 +64,18 @@ _Avoid_: Webhook attempt log, notification job
 A Notification Destination is a Merchant Account's configured endpoint for receiving externally delivered Domain Events. One Domain Event may create one Notification Delivery Record per active Notification Destination.
 _Avoid_: Webhook setting, callback URL, notification job target
 
+**Notification Delivery Payload**:
+A Notification Delivery Payload is the externally delivered representation of one Domain Event for a Notification Destination. It carries the Domain Event identity, type, occurrence time, Resource identity, schema version, and event-specific payload.
+_Avoid_: Ping payload, raw event payload, webhook body
+
+**Notification Delivery Attempt**:
+A Notification Delivery Attempt is one System Principal try to deliver a Notification Delivery Payload to a Notification Destination.
+_Avoid_: Retry count, webhook call, notification job run
+
+**Notification Delivery Error**:
+A Notification Delivery Error is the operational error observed on the most recent failed Notification Delivery Attempt.
+_Avoid_: Payment failure reason, refund failure reason, business decline reason
+
 **Domain Event**:
 A Domain Event is an immutable fact that a meaningful Payment or Refund lifecycle change occurred. Domain Events may be used to create Notification Delivery Records, but they are not themselves delivery attempts.
 _Avoid_: Webhook, notification, audit record
@@ -138,6 +150,10 @@ _Avoid_: System user, service account
 - System-initiated work uses a **System Principal**, not an **Actor** or **Unknown Principal**.
 - Emitting a **Domain Event** means recording the immutable domain fact; creating a **Notification Delivery Record** for that event is separate notification pipeline work.
 - `payment.processing` is a **Domain Event** for the Payment lifecycle even when it is not externally delivered; not every **Domain Event** creates a **Notification Delivery Record**.
+- "Notification payload" in planning docs means a **Notification Delivery Payload**, not only the event-specific **Domain Event** payload or a test ping body.
+- "Failed delivery records the failure reason" in planning docs means recording a **Notification Delivery Error**; do not use Payment or Refund **failure_reason** language for notification transport outcomes.
+- "Retry count" in planning docs means the **Notification Delivery Record** attempt count: the number of recorded Notification Delivery Attempts so far, not a separate retry-only counter.
+- A **Notification Delivery Payload** does not introduce a universal top-level **Idempotency Key**; command-specific Idempotency Keys appear only when they are part of the delivered event-specific payload.
 - "Merchant reference" in planning docs means **Merchant Reference**, not the gateway Payment identifier, Idempotency Key, or arbitrary Payment Metadata.
 - "Payment identifier" in list/search planning means the Payment ID, not the **Idempotency Key** used to identify a create command.
 
@@ -157,3 +173,5 @@ _Avoid_: System user, service account
 - Domain expert: "Record an Unknown Principal, because no Actor has been authenticated yet."
 - Dev: "Where does a Notification Delivery Record send an event?"
 - Domain expert: "To the Merchant Account's active Notification Destination; the record tracks delivery of that Domain Event to that destination."
+- Dev: "Should the merchant receive only the Domain Event payload?"
+- Domain expert: "No. Send a Notification Delivery Payload so the merchant can identify the Domain Event and then read its event-specific payload."

@@ -141,7 +141,7 @@ entities:
         type: NotificationStatus
         required: true
         description: "Current delivery status"
-      retry_count:
+      attempt_count:
         type: integer
         required: true
         default: 0

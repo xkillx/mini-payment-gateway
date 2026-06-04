@@ -1,20 +1,15 @@
 use notifications::repository::{NotificationRepository, PostgresNotificationRepository};
+use notifications::service::{
+    DefaultNotificationService, NotificationDeliverySettings, ReqwestNotificationTransport,
+};
 use payments::service::{process_next_pending_payment, PaymentProcessingOutcome};
 use shared_config::AppConfig;
 use shared_db as db;
 use shared_observability as observability;
 use sqlx::PgPool;
 use std::time::Duration;
-use uuid::Uuid;
 
 const NOTIFICATION_PROJECTION_BATCH_SIZE: i64 = 100;
-
-#[derive(sqlx::FromRow)]
-struct PendingNotification {
-    id: Uuid,
-    destination_url: String,
-    attempt_count: i32,
-}
 
 async fn poll_notifications(pool: &PgPool, config: &AppConfig) {
     loop {
@@ -64,109 +59,59 @@ async fn try_process_payment(pool: &PgPool) -> Result<(), anyhow::Error> {
 }
 
 async fn try_process_notifications(pool: &PgPool, config: &AppConfig) -> Result<(), anyhow::Error> {
-    let pending = sqlx::query_as::<_, PendingNotification>(
-        r#"
-        UPDATE notification_delivery_records
-        SET status = 'processing', updated_at = NOW()
-        WHERE id = (
-            SELECT id FROM notification_delivery_records
-            WHERE status = 'pending'
-              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-            ORDER BY created_at ASC
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-        )
-        RETURNING id, destination_url, attempt_count
-        "#,
-    )
-    .fetch_optional(pool)
-    .await?;
+    let repo = PostgresNotificationRepository::new(pool.clone());
+    let service = DefaultNotificationService::new(repo);
+    let transport = ReqwestNotificationTransport::new();
+    let settings = NotificationDeliverySettings::new(
+        config.notification_max_attempts,
+        config.notification_retry_delays_secs.clone(),
+    );
 
-    if let Some(record) = pending {
-        let id = record.id;
-        let url = record.destination_url;
-        let attempt_count = record.attempt_count;
-
-        tracing::info!(notification_id = %id, url = %url, attempt = attempt_count + 1, "Processing notification");
-
-        let success = deliver_notification(&url).await;
-
-        if success {
-            sqlx::query(
-                r#"
-                UPDATE notification_delivery_records
-                SET status = 'delivered', attempt_count = attempt_count + 1, last_attempt_at = NOW(), updated_at = NOW()
-                WHERE id = $1
-                "#,
-            )
-            .bind(id)
-            .execute(pool)
-            .await?;
-            tracing::info!(notification_id = %id, "Notification delivered");
-        } else {
-            let new_attempt = attempt_count + 1;
-            if new_attempt >= config.notification_max_attempts as i32 {
-                sqlx::query(
-                    r#"
-                    UPDATE notification_delivery_records
-                    SET status = 'failed', attempt_count = $2, last_attempt_at = NOW(), updated_at = NOW()
-                    WHERE id = $1
-                    "#,
-                )
-                .bind(id)
-                .bind(new_attempt)
-                .execute(pool)
-                .await?;
-                tracing::warn!(notification_id = %id, attempts = new_attempt, "Notification failed after max attempts");
-            } else {
-                let delay_secs = config
-                    .notification_retry_delays_secs
-                    .get((new_attempt - 1) as usize)
-                    .copied()
-                    .unwrap_or(3600);
-                let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
-                sqlx::query(
-                    r#"
-                    UPDATE notification_delivery_records
-                    SET status = 'pending', attempt_count = $2, last_attempt_at = NOW(), next_retry_at = $3, updated_at = NOW()
-                    WHERE id = $1
-                    "#,
-                )
-                .bind(id)
-                .bind(new_attempt)
-                .bind(next_retry)
-                .execute(pool)
-                .await?;
-                tracing::info!(notification_id = %id, next_retry = %next_retry, "Notification scheduled for retry");
+    match service
+        .process_next_due_delivery(&transport, &settings)
+        .await
+    {
+        Ok(Some(outcome)) => match outcome.status {
+            notifications::service::DeliveryStatus::Delivered => {
+                tracing::info!(
+                    notification_id = %outcome.record_id,
+                    event_type = %outcome.event_type,
+                    destination_url = %outcome.destination_url,
+                    attempt = outcome.attempt_number,
+                    "Notification delivered"
+                );
             }
+            notifications::service::DeliveryStatus::PendingRetry => {
+                tracing::info!(
+                    notification_id = %outcome.record_id,
+                    event_type = %outcome.event_type,
+                    destination_url = %outcome.destination_url,
+                    attempt = outcome.attempt_number,
+                    next_retry_at = ?outcome.next_retry_at,
+                    last_error = ?outcome.last_error,
+                    "Notification scheduled for retry"
+                );
+            }
+            notifications::service::DeliveryStatus::TerminalFailed => {
+                tracing::warn!(
+                    notification_id = %outcome.record_id,
+                    event_type = %outcome.event_type,
+                    destination_url = %outcome.destination_url,
+                    attempt = outcome.attempt_number,
+                    last_error = ?outcome.last_error,
+                    "Notification failed after max attempts"
+                );
+            }
+        },
+        Ok(None) => {
+            tracing::debug!("No due notification delivery records");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Notification delivery service error");
         }
     }
 
     Ok(())
-}
-
-async fn deliver_notification(url: &str) -> bool {
-    match reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
-        Ok(client) => match client
-            .post(url)
-            .json(&serde_json::json!({"event": "ping"}))
-            .send()
-            .await
-        {
-            Ok(resp) => resp.status().is_success(),
-            Err(e) => {
-                tracing::warn!(url = %url, error = %e, "Notification delivery failed");
-                false
-            }
-        },
-        Err(e) => {
-            tracing::error!("Failed to build HTTP client: {e}");
-            false
-        }
-    }
 }
 
 #[tokio::main]

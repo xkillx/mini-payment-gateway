@@ -101,6 +101,8 @@ pub struct PaymentNotificationDeliveryRecordResponse {
     pub attempt_count: i32,
     pub last_attempt_at: Option<DateTime<Utc>>,
     pub next_retry_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -344,12 +346,34 @@ mod tests {
             attempt_count: 0,
             last_attempt_at: None,
             next_retry_at: None,
+            last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
         let value = serde_json::to_value(record).unwrap();
         assert!(value.get("idempotency_key").is_none());
+        assert!(value.get("last_error").is_none());
         assert_eq!(value["event_type"], "payment.created");
+    }
+
+    #[test]
+    fn payment_notification_delivery_record_serializes_last_error_when_present() {
+        let record = PaymentNotificationDeliveryRecordResponse {
+            id: Uuid::nil(),
+            domain_event_id: Uuid::nil(),
+            event_type: "payment.created".into(),
+            destination_url: "https://example.com/webhook".into(),
+            status: "failed".into(),
+            attempt_count: 5,
+            last_attempt_at: Some(Utc::now()),
+            next_retry_at: None,
+            last_error: Some("http_status:500".into()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let value = serde_json::to_value(record).unwrap();
+        assert_eq!(value["last_error"], "http_status:500");
+        assert!(value.get("idempotency_key").is_none());
     }
 
     #[test]

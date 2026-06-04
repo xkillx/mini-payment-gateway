@@ -20,6 +20,7 @@ pub struct NotificationDeliveryRecord {
     pub attempt_count: i32,
     pub last_attempt_at: Option<DateTime<Utc>>,
     pub next_retry_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -32,4 +33,18 @@ pub struct NotificationDestination {
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimedNotificationDelivery {
+    pub id: Uuid,
+    pub domain_event_id: Uuid,
+    pub destination_url: String,
+    pub attempt_count: i32,
+    pub event_type: String,
+    pub aggregate_type: String,
+    pub aggregate_id: Uuid,
+    pub payload: serde_json::Value,
+    pub event_created_at: DateTime<Utc>,
+    pub version: i32,
 }

@@ -123,6 +123,25 @@ This creates an active destination for the seeded merchant (`00000000-0000-0000-
 
 The supported externally delivered event types are `payment.created`, `payment.successful`, `payment.failed`, `refund.created`, and `refund.completed`. The internal `payment.processing` event is not projected for notification delivery.
 
+### Notification Delivery Payload
+
+The worker sends the persisted Domain Event envelope as a JSON `POST` to the Notification Destination:
+
+```json
+{
+  "event_id": "<domain_events.id>",
+  "event_type": "payment.successful",
+  "occurred_at": "<domain_events.created_at RFC3339>",
+  "resource_type": "payment",
+  "resource_id": "<domain_events.aggregate_id>",
+  "schema_version": 1,
+  "payload": {}
+}
+```
+
+Delivery is at-least-once. Merchants should deduplicate using `event_id`. Only a `2xx` response marks delivery as successful. Non-`2xx` responses and transport errors are recorded as `last_error` on the notification delivery record and trigger retry or terminal failure per the configured `NOTIFICATION_MAX_ATTEMPTS` and `NOTIFICATION_RETRY_DELAYS_SECS`.
+
+
 ## Testing
 
 ```bash

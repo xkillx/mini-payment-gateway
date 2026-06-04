@@ -13,9 +13,4 @@ payments = { path = "../../crates/payments" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 sqlx = { workspace = true }
-chrono = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
-reqwest = { workspace = true }
 anyhow = { workspace = true }

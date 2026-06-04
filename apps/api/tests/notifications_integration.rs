@@ -601,3 +601,344 @@ async fn merchant_scoping_events_only_create_records_for_own_destinations() {
         "merchant B event should NOT create record for merchant A destination"
     );
 }
+
+// -------------------------------------------------------------------------
+// MPG-014 Notification Delivery Tests
+// -------------------------------------------------------------------------
+
+mod delivery_tests {
+    use super::*;
+    use notifications::repository::PostgresNotificationRepository;
+    use notifications::service::{
+        DefaultNotificationService, NotificationDeliveryPayload, NotificationDeliverySettings,
+        NotificationTransport,
+    };
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    struct FakeTransport {
+        response_code: Arc<Mutex<u16>>,
+        captured_payloads: Arc<Mutex<Vec<NotificationDeliveryPayload>>>,
+    }
+
+    impl FakeTransport {
+        fn new(response_code: u16) -> Self {
+            Self {
+                response_code: Arc::new(Mutex::new(response_code)),
+                captured_payloads: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl NotificationTransport for FakeTransport {
+        fn deliver(
+            &self,
+            _destination_url: &str,
+            payload: &NotificationDeliveryPayload,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>>
+        {
+            let code = *self.response_code.lock().unwrap();
+            self.captured_payloads.lock().unwrap().push(payload.clone());
+            Box::pin(async move { Ok(code) })
+        }
+    }
+
+    struct FailingTransport {
+        error: String,
+    }
+
+    impl NotificationTransport for FailingTransport {
+        fn deliver(
+            &self,
+            _destination_url: &str,
+            _payload: &NotificationDeliveryPayload,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>>
+        {
+            let msg = self.error.clone();
+            Box::pin(async move { Err(msg) })
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_delivery_sends_full_payload_and_marks_delivered() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let (_payment_id, payment_uuid) = create_pending_payment(&pool, 1000).await;
+        let events = get_domain_events(&pool, "payment", payment_uuid).await;
+        let created_event = events
+            .iter()
+            .find(|(_, t, _)| t == "payment.created")
+            .unwrap();
+
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE domain_event_id = $1 AND destination_url = $2",
+        )
+        .bind(created_event.0)
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "DELETE FROM notification_delivery_records WHERE id != $1",
+        )
+        .bind(notif_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let transport = FakeTransport::new(200);
+        let repo = PostgresNotificationRepository::new(pool.clone());
+        let service = DefaultNotificationService::new(repo);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should have claimed a record");
+
+        assert_eq!(outcome.record_id.to_string().len(), 36);
+        assert_eq!(outcome.destination_url, dest_url);
+        assert_eq!(outcome.event_type, "payment.created");
+        assert_eq!(outcome.attempt_number, 1);
+
+        let captured = transport.captured_payloads.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].event_id, created_event.0);
+        assert_eq!(captured[0].event_type, "payment.created");
+        assert_eq!(captured[0].resource_type, "payment");
+        assert_eq!(captured[0].resource_id, payment_uuid);
+        assert_eq!(captured[0].schema_version, 1);
+        assert!(captured[0].payload.get("payment_id").is_some());
+
+        let record: (String, i32, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, last_error, next_retry_at::text FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(outcome.record_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "delivered");
+        assert_eq!(record.1, 1);
+        assert!(
+            record.2.is_none(),
+            "last_error should be null after success"
+        );
+        assert!(
+            record.3.is_none(),
+            "next_retry_at should be null after success"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_2xx_failure_records_http_status_and_schedules_retry() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 2000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+        )
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let transport = FakeTransport::new(500);
+        let repo = PostgresNotificationRepository::new(pool.clone());
+        let service = DefaultNotificationService::new(repo);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should have claimed a record");
+
+        let record: (String, i32, String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, last_error, next_retry_at::text FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(outcome.record_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "pending");
+        assert_eq!(record.1, 1);
+        assert_eq!(record.2, "http_status:500");
+        assert!(record.3.is_some(), "next_retry_at should be set for retry");
+    }
+
+    #[tokio::test]
+    async fn transport_error_records_bounded_last_error() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 3000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+        )
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let transport = FailingTransport {
+            error: "request timed out".into(),
+        };
+        let repo = PostgresNotificationRepository::new(pool.clone());
+        let service = DefaultNotificationService::new(repo);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should have claimed a record");
+
+        let record: (String, i32, String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, last_error, next_retry_at::text FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(outcome.record_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "pending");
+        assert_eq!(record.1, 1);
+        assert_eq!(record.2, "timeout");
+    }
+
+    #[tokio::test]
+    async fn max_attempts_marks_terminal_failed() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 4000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+        )
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let transport = FakeTransport::new(503);
+        let repo = PostgresNotificationRepository::new(pool.clone());
+        let service = DefaultNotificationService::new(repo);
+        let settings = NotificationDeliverySettings::new(1, vec![]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should deliver one attempt that fails");
+
+        let record: (String, i32, String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, last_error, next_retry_at::text FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(outcome.record_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "failed");
+        assert_eq!(record.1, 1);
+        assert_eq!(record.2, "http_status:503");
+        assert!(record.3.is_none(), "next_retry_at should be null on terminal failure");
+    }
+
+    #[tokio::test]
+    async fn stale_processing_record_is_reclaimed() {
+        let pool = setup_db().await;
+        sqlx::query("DELETE FROM notification_delivery_records")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 5000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE status = 'pending' LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let stale_time = chrono::Utc::now() - chrono::Duration::minutes(10);
+        sqlx::query(
+            "UPDATE notification_delivery_records SET status = 'processing', last_attempt_at = $2 WHERE id = $1",
+        )
+        .bind(notif_id)
+        .bind(stale_time)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let transport = FakeTransport::new(200);
+        let repo = PostgresNotificationRepository::new(pool.clone());
+        let service = DefaultNotificationService::new(repo);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("stale processing record should be reclaimed");
+
+        let record: (String, i32, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, last_error, next_retry_at::text FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(outcome.record_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "delivered");
+        assert!(record.1 >= 1, "attempt_count should be at least 1");
+        assert!(record.2.is_none());
+        assert!(record.3.is_none());
+    }
+}

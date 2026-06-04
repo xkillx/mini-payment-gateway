@@ -1123,8 +1123,10 @@ dependencies = [
 name = "notifications"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
  "shared-auth",
@@ -3117,19 +3119,14 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "notifications",
  "payments",
- "reqwest",
- "serde",
- "serde_json",
  "shared-config",
  "shared-db",
  "shared-observability",
  "sqlx",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]

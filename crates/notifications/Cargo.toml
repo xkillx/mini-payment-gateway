@@ -13,3 +13,5 @@ thiserror = { workspace = true }
 sqlx = { workspace = true }
 shared-auth = { path = "../shared-auth" }
 shared-http = { path = "../shared-http" }
+reqwest = { workspace = true }
+anyhow = { workspace = true }

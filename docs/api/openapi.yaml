@@ -990,6 +990,10 @@ components:
           format: date-time
           nullable: true
           description: When the next retry is scheduled (null when not pending)
+        last_error:
+          type: string
+          nullable: true
+          description: Latest operational delivery error (null on delivery, set on failure)
         created_at:
           type: string
           format: date-time

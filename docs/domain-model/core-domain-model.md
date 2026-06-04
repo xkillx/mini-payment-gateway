@@ -50,7 +50,7 @@ Tracks delivery of one domain event to one destination.
 | `destination` | String | Yes | Target delivery endpoint or address |
 | `event_type` | String | Yes | The type of domain event being delivered |
 | `status` | NotificationStatus | Yes | Current delivery status |
-| `retry_count` | Integer | Yes | Number of delivery attempts so far |
+| `attempt_count` | Integer | Yes | Number of delivery attempts so far |
 | `last_error` | String | No | Error message from the last failed attempt |
 | `last_attempt_at` | Timestamp | No | Timestamp of the most recent delivery attempt |
 | `next_retry_at` | Timestamp | No | When the next retry is scheduled (if applicable) |

@@ -219,6 +219,7 @@ struct NotificationRow {
     attempt_count: i32,
     last_attempt_at: Option<DateTime<Utc>>,
     next_retry_at: Option<DateTime<Utc>>,
+    last_error: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -290,7 +291,7 @@ pub async fn get_payment_detail(
             r#"
             SELECT n.id, n.domain_event_id, e.event_type, n.destination_url,
                    n.status::text AS status, n.attempt_count, n.last_attempt_at,
-                   n.next_retry_at, n.created_at, n.updated_at
+                   n.next_retry_at, n.last_error, n.created_at, n.updated_at
             FROM notification_delivery_records n
             JOIN domain_events e ON e.id = n.domain_event_id
             WHERE n.domain_event_id = ANY($1)
@@ -336,6 +337,7 @@ pub async fn get_payment_detail(
                 attempt_count: n.attempt_count,
                 last_attempt_at: n.last_attempt_at,
                 next_retry_at: n.next_retry_at,
+                last_error: n.last_error,
                 created_at: n.created_at,
                 updated_at: n.updated_at,
             })
