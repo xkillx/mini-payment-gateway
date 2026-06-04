@@ -168,6 +168,7 @@ entities:
         description: "Last modification timestamp"
     statuses:
       - pending
+      - processing
       - delivered
       - failed
 
@@ -294,10 +295,14 @@ transitions:
       side_effect: "Emit refund.failed; record failure_reason; payment remains successful"
   notification_delivery_record:
     - from: pending
+      to: processing
+      precondition: "Delivery attempt is claimed"
+      side_effect: "Begin delivery attempt"
+    - from: processing
       to: delivered
       precondition: "Delivery attempt succeeded"
       side_effect: "Record delivery timestamp"
-    - from: pending
+    - from: processing
       to: failed
       precondition: "All delivery attempts exhausted"
       side_effect: "Record last error"

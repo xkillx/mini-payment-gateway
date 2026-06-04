@@ -23,3 +23,13 @@ pub struct NotificationDeliveryRecord {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct NotificationDestination {
+    pub id: Uuid,
+    pub merchant_id: Uuid,
+    pub destination_url: String,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

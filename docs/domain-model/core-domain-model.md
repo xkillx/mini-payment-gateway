@@ -134,10 +134,11 @@ pending  →  processing  →  completed
 | Status | Description |
 |---|---|
 | `pending` | Awaiting first delivery attempt |
+| `processing` | Delivery attempt is in progress |
 | `delivered` | Successfully delivered to destination |
 | `failed` | All delivery attempts exhausted |
 
-Transitions: `pending → delivered | failed`
+Transitions: `pending → processing → delivered | failed`
 
 ### 2.4 Reconciliation Status
 

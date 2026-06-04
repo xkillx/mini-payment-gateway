@@ -105,6 +105,24 @@ cargo run -p shared-auth --example generate_token -- administrator
 
 Set `JWT_SECRET` env var or it defaults to `dev-secret-change-in-production`.
 
+## Notification Destinations (local testing until MPG-028)
+
+Notification Destinations are not seeded by default. To enable notification delivery records during local development, insert an active destination manually:
+
+```sql
+INSERT INTO notification_destinations (id, merchant_id, destination_url, is_active)
+VALUES (
+  '00000000-0000-0000-0000-000000000003',
+  '00000000-0000-0000-0000-000000000001',
+  'https://example.test/webhook',
+  true
+);
+```
+
+This creates an active destination for the seeded merchant (`00000000-0000-0000-0000-000000000001`). The worker will then project eligible domain events into pending notification delivery records and attempt delivery.
+
+The supported externally delivered event types are `payment.created`, `payment.successful`, `payment.failed`, `refund.created`, and `refund.completed`. The internal `payment.processing` event is not projected for notification delivery.
+
 ## Testing
 
 ```bash

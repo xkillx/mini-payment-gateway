@@ -60,6 +60,10 @@ _Avoid_: Refund state machine (as a replacement for status term)
 A Notification Delivery Record tracks delivery of one domain event to one destination and its outcome.
 _Avoid_: Webhook attempt log, notification job
 
+**Notification Destination**:
+A Notification Destination is a Merchant Account's configured endpoint for receiving externally delivered Domain Events. One Domain Event may create one Notification Delivery Record per active Notification Destination.
+_Avoid_: Webhook setting, callback URL, notification job target
+
 **Domain Event**:
 A Domain Event is an immutable fact that a meaningful Payment or Refund lifecycle change occurred. Domain Events may be used to create Notification Delivery Records, but they are not themselves delivery attempts.
 _Avoid_: Webhook, notification, audit record
@@ -151,3 +155,5 @@ _Avoid_: System user, service account
 - Domain expert: "Only if the actor is an Administrator. A Merchant sees Payments for its own Merchant Account."
 - Dev: "Who is recorded when authentication fails before we know the party?"
 - Domain expert: "Record an Unknown Principal, because no Actor has been authenticated yet."
+- Dev: "Where does a Notification Delivery Record send an event?"
+- Domain expert: "To the Merchant Account's active Notification Destination; the record tracks delivery of that Domain Event to that destination."

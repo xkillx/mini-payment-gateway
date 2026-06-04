@@ -1,3 +1,4 @@
+use notifications::repository::{NotificationRepository, PostgresNotificationRepository};
 use payments::service::{process_next_pending_payment, PaymentProcessingOutcome};
 use shared_config::AppConfig;
 use shared_db as db;
@@ -5,6 +6,8 @@ use shared_observability as observability;
 use sqlx::PgPool;
 use std::time::Duration;
 use uuid::Uuid;
+
+const NOTIFICATION_PROJECTION_BATCH_SIZE: i64 = 100;
 
 #[derive(sqlx::FromRow)]
 struct PendingNotification {
@@ -18,11 +21,27 @@ async fn poll_notifications(pool: &PgPool, config: &AppConfig) {
         if let Err(e) = try_process_payment(pool).await {
             tracing::error!("Payment processing error: {e}");
         }
+        if let Err(e) = try_project_notifications(pool).await {
+            tracing::error!("Notification projection error: {e}");
+        }
         if let Err(e) = try_process_notifications(pool, config).await {
             tracing::error!("Notification processing error: {e}");
         }
         tokio::time::sleep(Duration::from_millis(config.worker_poll_interval_ms)).await;
     }
+}
+
+async fn try_project_notifications(pool: &PgPool) -> Result<u64, anyhow::Error> {
+    let repo = PostgresNotificationRepository::new(pool.clone());
+    let inserted = repo
+        .project_domain_events(NOTIFICATION_PROJECTION_BATCH_SIZE)
+        .await?;
+    if inserted > 0 {
+        tracing::info!(inserted, "Projected notification delivery records");
+    } else {
+        tracing::debug!("No new notification delivery records to project");
+    }
+    Ok(inserted)
 }
 
 async fn try_process_payment(pool: &PgPool) -> Result<(), anyhow::Error> {

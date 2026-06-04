@@ -12,6 +12,7 @@ pub trait NotificationService: Send + Sync {
         &self,
         record: &NotificationDeliveryRecord,
     ) -> Result<NotificationDeliveryRecord, sqlx::Error>;
+    async fn project_domain_events(&self, limit: i64) -> Result<u64, sqlx::Error>;
 }
 
 pub struct DefaultNotificationService<R: NotificationRepository> {
@@ -37,5 +38,9 @@ impl<R: NotificationRepository + 'static> NotificationService for DefaultNotific
         record: &NotificationDeliveryRecord,
     ) -> Result<NotificationDeliveryRecord, sqlx::Error> {
         self.repo.insert(record).await
+    }
+
+    async fn project_domain_events(&self, limit: i64) -> Result<u64, sqlx::Error> {
+        self.repo.project_domain_events(limit).await
     }
 }
