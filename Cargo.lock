@@ -1530,6 +1530,7 @@ dependencies = [
 name = "reconciliation"
 version = "0.1.0"
 dependencies = [
+ "audit",
  "axum",
  "chrono",
  "serde",
@@ -1538,6 +1539,7 @@ dependencies = [
  "shared-http",
  "sqlx",
  "thiserror",
+ "tracing",
  "uuid",
 ]
 

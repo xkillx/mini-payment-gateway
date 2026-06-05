@@ -179,11 +179,11 @@ entities:
         type: uuid
         required: true
         description: "Unique identifier"
-      expected_amount_minor:
+      expected_total_minor:
         type: integer
         required: true
         description: "Expected balance computed from successful payments and refunds"
-      actual_amount_minor:
+      actual_total_minor:
         type: integer
         required: true
         description: "Actual balance provided by operator or external source"
@@ -200,6 +200,14 @@ entities:
         type: ReconciliationStatus
         required: true
         description: "Outcome of the reconciliation run"
+      window_start:
+        type: timestamp
+        required: true
+        description: "Inclusive start of the Reconciliation Window"
+      window_end:
+        type: timestamp
+        required: true
+        description: "Exclusive end of the Reconciliation Window"
       notes:
         type: string
         required: false

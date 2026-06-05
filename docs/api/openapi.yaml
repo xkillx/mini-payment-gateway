@@ -454,13 +454,27 @@ paths:
       summary: Run a reconciliation (Administrator only)
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunReconciliationRequest"
       responses:
+        "201":
+          description: Reconciliation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/audit:
     get:
@@ -1404,3 +1418,94 @@ components:
         offset:
           type: integer
           description: Number of records skipped
+
+    ReconciliationStatus:
+      type: string
+      enum:
+        - matched
+        - mismatched
+        - error
+      description: |
+        Outcome of a Reconciliation run.
+        - `matched`: expected and actual totals are equal
+        - `mismatched`: expected and actual totals differ
+        - `error`: comparison could not be completed
+
+    RunReconciliationRequest:
+      type: object
+      required:
+        - currency
+        - window_start
+        - window_end
+        - actual_total_minor
+      properties:
+        currency:
+          type: string
+          description: Configured Currency for the reconciliation (must match gateway configuration)
+        window_start:
+          type: string
+          format: date-time
+          description: Inclusive start of the Reconciliation Window (RFC 3339)
+        window_end:
+          type: string
+          format: date-time
+          description: Exclusive end of the Reconciliation Window (RFC 3339)
+        actual_total_minor:
+          type: integer
+          description: Administrator-provided actual total in minor units (may be negative)
+        notes:
+          type: string
+          description: Optional notes about this reconciliation run
+
+    ReconciliationResponse:
+      type: object
+      required:
+        - id
+        - status
+        - expected_total_minor
+        - actual_total_minor
+        - discrepancy_minor
+        - currency
+        - window_start
+        - window_end
+        - run_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for this Reconciliation
+        status:
+          $ref: "#/components/schemas/ReconciliationStatus"
+        expected_total_minor:
+          type: integer
+          description: Gateway-computed net total (successful Payments less completed Refunds) in minor units
+        actual_total_minor:
+          type: integer
+          description: Administrator-provided actual total in minor units
+        discrepancy_minor:
+          type: integer
+          description: Difference (actual - expected) in minor units. Zero means matched.
+        currency:
+          type: string
+          description: Configured Currency for this reconciliation
+        window_start:
+          type: string
+          format: date-time
+          description: Inclusive start of the Reconciliation Window
+        window_end:
+          type: string
+          format: date-time
+          description: Exclusive end of the Reconciliation Window
+        notes:
+          type: string
+          nullable: true
+          description: Optional notes provided at reconciliation time
+        run_at:
+          type: string
+          format: date-time
+          description: When this Reconciliation was executed
+        created_at:
+          type: string
+          format: date-time
+          description: When this Reconciliation record was persisted

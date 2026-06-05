@@ -10,7 +10,6 @@ No tickets currently assigned.
 
 ### Backlog
 
-- [MPG-017](#mpg-017-run-manual-reconciliation)
 - [MPG-018](#mpg-018-generate-reconciliation-report)
 - [MPG-019](#mpg-019-build-merchant-dashboard)
 - [MPG-020](#mpg-020-build-admin-dashboard)
@@ -41,6 +40,7 @@ No tickets currently assigned.
 - [MPG-014](#mpg-014-deliver-notifications)
 - [MPG-015](#mpg-015-retry-failed-notifications)
 - [MPG-016](#mpg-016-track-notification-delivery-status)
+- [MPG-017](#mpg-017-run-manual-reconciliation)
 
 ---
 

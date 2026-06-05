@@ -81,12 +81,32 @@ A Domain Event is an immutable fact that a meaningful Payment or Refund lifecycl
 _Avoid_: Webhook, notification, audit record
 
 **Reconciliation**:
-Reconciliation is a record of one balance comparison run between expected and actual financial totals.
+Reconciliation is a record of one balance comparison run for one Configured Currency over one explicit Reconciliation Window.
 _Avoid_: Settlement run, accounting sync
+
+**Manual Reconciliation**:
+A Manual Reconciliation is an Administrator-initiated Reconciliation across all Merchant Accounts for one Configured Currency and Reconciliation Window.
+_Avoid_: Merchant reconciliation, scheduled reconciliation
+
+**Reconciliation Window**:
+A Reconciliation Window is the time range whose successful Payment outcomes and completed Refund outcomes are included in one Reconciliation.
+_Avoid_: Report date, settlement period
+
+**Expected Reconciliation Total**:
+An Expected Reconciliation Total is the gateway-computed net financial total for a Reconciliation Window: successful Payments less completed Refunds.
+_Avoid_: Actual balance, processor total
+
+**Actual Reconciliation Total**:
+An Actual Reconciliation Total is the administrator-provided financial total being compared with the Expected Reconciliation Total for the same Configured Currency and Reconciliation Window.
+_Avoid_: Expected balance, computed total
 
 **Reconciliation Status**:
 Reconciliation Status expresses the outcome of a Reconciliation run: matched, mismatched, or error.
 _Avoid_: Reconciliation processing state
+
+**Reconciliation Report**:
+A Reconciliation Report is the administrator-facing detail view of a Reconciliation and any identifiable mismatched records.
+_Avoid_: Manual reconciliation run, settlement file
 
 **Audit Record**:
 An Audit Record is an append-only historical fact about who performed or attempted which action on which resource and when.
@@ -159,6 +179,16 @@ _Avoid_: System user, service account
 - A **Notification Delivery Payload** does not introduce a universal top-level **Idempotency Key**; command-specific Idempotency Keys appear only when they are part of the delivered event-specific payload.
 - "Merchant reference" in planning docs means **Merchant Reference**, not the gateway Payment identifier, Idempotency Key, or arbitrary Payment Metadata.
 - "Payment identifier" in list/search planning means the Payment ID, not the **Idempotency Key** used to identify a create command.
+- A **Reconciliation** compares one **Expected Reconciliation Total** with one **Actual Reconciliation Total** for the same **Configured Currency** and **Reconciliation Window**; it is not an all-time or cross-currency total.
+- **Manual Reconciliation** is platform-wide in MVP; merchant-level reconciliation is future scope.
+- A **Reconciliation Window** uses financial outcome time: when a Payment became successful or a Refund became completed. Window start is inclusive and window end is exclusive.
+- A **Reconciliation Window** is expressed as exact timestamp instants, not business dates or timezone-specific calendar days.
+- An **Actual Reconciliation Total** is a net amount in minor units after refunds are subtracted. It may be zero or negative.
+- **Manual Reconciliation** produces a run-level Reconciliation result. Item-level mismatch detail belongs to a **Reconciliation Report**.
+- A valid accepted **Manual Reconciliation** should create a **Reconciliation** even when the comparison cannot complete, using **Reconciliation Status** `error` when possible. Invalid requests are rejected without creating a Reconciliation.
+- A **Reconciliation** is matched only when the discrepancy is exactly zero minor units; any non-zero discrepancy is mismatched.
+- Every accepted **Manual Reconciliation** that creates a **Reconciliation** must also create an **Audit Record** that references that Reconciliation.
+- An Administrator may run **Manual Reconciliation** more than once for the same Configured Currency and Reconciliation Window. Each run is a separate historical Reconciliation.
 
 ## Example dialogue
 
@@ -178,3 +208,5 @@ _Avoid_: System user, service account
 - Domain expert: "To the Merchant Account's active Notification Destination; the record tracks delivery of that Domain Event to that destination."
 - Dev: "Should the merchant receive only the Domain Event payload?"
 - Domain expert: "No. Send a Notification Delivery Payload so the merchant can identify the Domain Event and then read its event-specific payload."
+- Dev: "Can this Manual Reconciliation use all payments since launch?"
+- Domain expert: "No. It compares one Expected Reconciliation Total with one Actual Reconciliation Total for a specific Reconciliation Window."

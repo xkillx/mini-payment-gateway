@@ -40,7 +40,10 @@ pub fn build(state: AppState) -> Router {
         notifications::routes::routes(state.pool.clone()),
         admin_only.clone(),
     );
-    let reconciliation_routes = role_guard(reconciliation::routes::routes(), admin_only.clone());
+    let reconciliation_routes = role_guard(
+        reconciliation::routes::routes(state.pool.clone(), state.config.payment_currency.clone()),
+        admin_only.clone(),
+    );
     let audit_routes = role_guard(
         audit::routes::routes(state.pool.clone()),
         admin_only.clone(),

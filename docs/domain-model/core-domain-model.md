@@ -62,13 +62,15 @@ Tracks delivery of one domain event to one destination.
 A record of one balance comparison run.
 
 | Attribute | Type | Required | Description |
-|---|---|---|---|
+|---|---|---|---|---|
 | `reconciliation_id` | UUID | Yes | Unique identifier for this reconciliation run |
-| `expected_amount_minor` | Integer | Yes | Expected balance computed from successful payments and refunds |
-| `actual_amount_minor` | Integer | Yes | Actual balance provided by the operator or external source |
+| `expected_total_minor` | Integer | Yes | Expected balance computed from successful payments and refunds |
+| `actual_total_minor` | Integer | Yes | Actual balance provided by the operator or external source |
 | `discrepancy_minor` | Integer | Yes | Difference between expected and actual (actual − expected) |
 | `currency` | String(3) | Yes | ISO 4217 currency code |
 | `status` | ReconciliationStatus | Yes | Outcome of the reconciliation run |
+| `window_start` | Timestamp | Yes | Inclusive start of the Reconciliation Window |
+| `window_end` | Timestamp | Yes | Exclusive end of the Reconciliation Window |
 | `notes` | String | No | Operator notes or context |
 | `run_at` | Timestamp | Yes | When the reconciliation was executed |
 | `created_at` | Timestamp | Yes | When the record was created |
