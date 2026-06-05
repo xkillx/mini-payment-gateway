@@ -89,6 +89,7 @@ impl PostgresNotificationRepository {
             event_type: String,
             resource_type: String,
             resource_id: Uuid,
+            payment_id: Uuid,
         }
 
         let row = sqlx::query_as::<_, RetryRow>(
@@ -105,7 +106,11 @@ impl PostgresNotificationRepository {
                 created_at, updated_at,
                 (SELECT event_type FROM domain_events de WHERE de.id = domain_event_id) AS event_type,
                 (SELECT aggregate_type FROM domain_events de WHERE de.id = domain_event_id) AS resource_type,
-                (SELECT aggregate_id FROM domain_events de WHERE de.id = domain_event_id) AS resource_id
+                (SELECT aggregate_id FROM domain_events de WHERE de.id = domain_event_id) AS resource_id,
+                COALESCE(
+                    (SELECT aggregate_id FROM domain_events de WHERE de.id = domain_event_id AND de.aggregate_type = 'payment'),
+                    (SELECT r.payment_id FROM domain_events de JOIN refunds r ON de.aggregate_type = 'refund' AND r.id = de.aggregate_id WHERE de.id = domain_event_id)
+                ) AS payment_id
             "#,
         )
         .bind(id)
@@ -124,6 +129,7 @@ impl PostgresNotificationRepository {
             row.event_type,
             row.resource_type,
             row.resource_id,
+            row.payment_id,
             row.destination_url,
             row.status,
             row.attempt_count,
@@ -160,6 +166,7 @@ struct NotificationDetailRow {
     event_type: String,
     resource_type: String,
     resource_id: Uuid,
+    payment_id: Uuid,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -183,6 +190,7 @@ fn build_detail(
     event_type: String,
     resource_type: String,
     resource_id: Uuid,
+    payment_id: Uuid,
     destination_url: String,
     status: crate::models::NotificationStatus,
     attempt_count: i32,
@@ -194,12 +202,33 @@ fn build_detail(
     updated_at: DateTime<Utc>,
     attempts: Vec<NotificationDeliveryAttemptResponse>,
 ) -> NotificationDeliveryRecordDetailResponse {
+    let resource_api_path = match resource_type.as_str() {
+        "payment" => format!("/api/v1/payments/{resource_id}"),
+        "refund" => format!("/api/v1/refunds/{resource_id}"),
+        _ => format!("/api/v1/{}s/{resource_id}", resource_type),
+    };
+    let payment_api_path = format!("/api/v1/payments/{payment_id}");
+
+    let (refund_id, refund_api_path) = if resource_type == "refund" {
+        (
+            Some(resource_id),
+            Some(format!("/api/v1/refunds/{resource_id}")),
+        )
+    } else {
+        (None, None)
+    };
+
     NotificationDeliveryRecordDetailResponse {
         id,
         domain_event_id,
         event_type,
         resource_type,
         resource_id,
+        resource_api_path,
+        payment_id,
+        payment_api_path,
+        refund_id,
+        refund_api_path,
         destination_url,
         status,
         attempt_count,
@@ -653,9 +682,14 @@ impl NotificationRepository for PostgresNotificationRepository {
         filter: &NotificationListFilter,
     ) -> Result<Vec<NotificationDeliveryRecordDetailResponse>, sqlx::Error> {
         let mut qb: sqlx::QueryBuilder<'_, Postgres> = sqlx::QueryBuilder::new(
-            r#"SELECT ndr.id, ndr.domain_event_id, ndr.destination_url, ndr.status, ndr.attempt_count, ndr.retry_generation, ndr.last_attempt_at, ndr.next_retry_at, ndr.last_error, ndr.created_at, ndr.updated_at, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id
+            r#"SELECT ndr.id, ndr.domain_event_id, ndr.destination_url, ndr.status, ndr.attempt_count, ndr.retry_generation, ndr.last_attempt_at, ndr.next_retry_at, ndr.last_error, ndr.created_at, ndr.updated_at, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id,
+            COALESCE(
+                CASE WHEN de.aggregate_type = 'payment' THEN de.aggregate_id END,
+                r.payment_id
+            ) AS payment_id
             FROM notification_delivery_records ndr
             JOIN domain_events de ON de.id = ndr.domain_event_id
+            LEFT JOIN refunds r ON de.aggregate_type = 'refund' AND r.id = de.aggregate_id
             WHERE 1=1"#,
         );
 
@@ -682,6 +716,7 @@ impl NotificationRepository for PostgresNotificationRepository {
                 row.event_type,
                 row.resource_type,
                 row.resource_id,
+                row.payment_id,
                 row.destination_url,
                 row.status,
                 row.attempt_count,
@@ -703,9 +738,14 @@ impl NotificationRepository for PostgresNotificationRepository {
     ) -> Result<Option<NotificationDeliveryRecordDetailResponse>, sqlx::Error> {
         let row = sqlx::query_as::<_, NotificationDetailRow>(
             r#"
-            SELECT ndr.id, ndr.domain_event_id, ndr.destination_url, ndr.status, ndr.attempt_count, ndr.retry_generation, ndr.last_attempt_at, ndr.next_retry_at, ndr.last_error, ndr.created_at, ndr.updated_at, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id
+            SELECT ndr.id, ndr.domain_event_id, ndr.destination_url, ndr.status, ndr.attempt_count, ndr.retry_generation, ndr.last_attempt_at, ndr.next_retry_at, ndr.last_error, ndr.created_at, ndr.updated_at, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id,
+            COALESCE(
+                CASE WHEN de.aggregate_type = 'payment' THEN de.aggregate_id END,
+                r.payment_id
+            ) AS payment_id
             FROM notification_delivery_records ndr
             JOIN domain_events de ON de.id = ndr.domain_event_id
+            LEFT JOIN refunds r ON de.aggregate_type = 'refund' AND r.id = de.aggregate_id
             WHERE ndr.id = $1
             "#,
         )
@@ -724,6 +764,7 @@ impl NotificationRepository for PostgresNotificationRepository {
             row.event_type,
             row.resource_type,
             row.resource_id,
+            row.payment_id,
             row.destination_url,
             row.status,
             row.attempt_count,

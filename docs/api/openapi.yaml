@@ -1029,6 +1029,9 @@ components:
         - event_type
         - resource_type
         - resource_id
+        - resource_api_path
+        - payment_id
+        - payment_api_path
         - destination_url
         - status
         - attempt_count
@@ -1055,6 +1058,36 @@ components:
           type: string
           format: uuid
           description: Aggregate ID from the Domain Event
+        resource_api_path:
+          type: string
+          description: |
+            Relative API path for the direct Resource identified by `resource_type`/`resource_id`.
+            For Payment events this is `/api/v1/payments/{resource_id}`.
+            For Refund events this is `/api/v1/refunds/{resource_id}`.
+        payment_id:
+          type: string
+          format: uuid
+          description: |
+            Related Payment ID. For Payment events this is the direct Resource ID.
+            For Refund events this is the owning Payment ID.
+        payment_api_path:
+          type: string
+          description: |
+            Relative API path for the related Payment context
+            (`/api/v1/payments/{payment_id}`).
+        refund_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Present only when `resource_type` is `refund`. The Refund ID that is the direct
+            Resource for this Notification Delivery Record.
+        refund_api_path:
+          type: string
+          nullable: true
+          description: |
+            Present only when `resource_type` is `refund`. Relative API path for the direct
+            Refund Resource (`/api/v1/refunds/{refund_id}`).
         destination_url:
           type: string
           format: uri

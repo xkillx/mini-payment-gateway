@@ -154,6 +154,8 @@ _Avoid_: System user, service account
 - "Failed delivery records the failure reason" in planning docs means recording a **Notification Delivery Error**; do not use Payment or Refund **failure_reason** language for notification transport outcomes.
 - "Retry count" in planning docs means the **Notification Delivery Record** attempt count: the number of recorded Notification Delivery Attempts so far, not a separate retry-only counter.
 - An Administrator retry request requeues a **Notification Delivery Record**; it is an **Administrative Action**, not a **Notification Delivery Attempt** until the **System Principal** tries delivery again.
+- "Retried notifications" in planning docs means **Notification Delivery Records** with retry activity visible in their attempt history and retry generation; it is not a separate **Notification Status**.
+- When a **Notification Delivery Record** is created from a Refund **Domain Event**, the direct **Resource** is the Refund and the owning Payment remains the related Payment context.
 - A **Notification Delivery Payload** does not introduce a universal top-level **Idempotency Key**; command-specific Idempotency Keys appear only when they are part of the delivered event-specific payload.
 - "Merchant reference" in planning docs means **Merchant Reference**, not the gateway Payment identifier, Idempotency Key, or arbitrary Payment Metadata.
 - "Payment identifier" in list/search planning means the Payment ID, not the **Idempotency Key** used to identify a create command.

@@ -130,6 +130,13 @@ pub struct NotificationDeliveryRecordDetailResponse {
     pub event_type: String,
     pub resource_type: String,
     pub resource_id: Uuid,
+    pub resource_api_path: String,
+    pub payment_id: Uuid,
+    pub payment_api_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refund_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refund_api_path: Option<String>,
     pub destination_url: String,
     pub status: NotificationStatus,
     pub attempt_count: i32,

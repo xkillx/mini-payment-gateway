@@ -1582,4 +1582,192 @@ mod admin_tests {
             "new attempt should deliver"
         );
     }
+
+    // -------------------------------------------------------------------------
+    // MPG-016 Navigation Field Tests
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn payment_event_notification_includes_payment_navigation_fields() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let (_payment_id, payment_uuid) = create_pending_payment(&pool, 1000).await;
+        drain_projection(&pool).await;
+
+        let events = get_domain_events(&pool, "payment", payment_uuid).await;
+        let created_event = events
+            .iter()
+            .find(|(_, t, _)| t == "payment.created")
+            .unwrap();
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE domain_event_id = $1 AND destination_url = $2",
+        )
+        .bind(created_event.0)
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            &format!("/api/v1/notifications/{notif_id}"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["resource_type"], "payment");
+        assert_eq!(body["resource_id"], payment_uuid.to_string());
+        assert_eq!(
+            body["resource_api_path"],
+            format!("/api/v1/payments/{payment_uuid}")
+        );
+        assert_eq!(body["payment_id"], payment_uuid.to_string());
+        assert_eq!(
+            body["payment_api_path"],
+            format!("/api/v1/payments/{payment_uuid}")
+        );
+        assert!(body.get("refund_id").map_or(true, |v| v.is_null()));
+        assert!(body.get("refund_api_path").map_or(true, |v| v.is_null()));
+    }
+
+    #[tokio::test]
+    async fn refund_event_notification_includes_refund_and_payment_navigation_fields() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+
+        let payment_id = create_successful_payment(&pool).await;
+
+        let refund_id = new_uuid_v7();
+        let refund_idem = format!("refund-idem-{}", new_uuid_v7());
+        let now = chrono::Utc::now();
+
+        sqlx::query(
+            r#"
+            INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7, $7)
+            "#,
+        )
+        .bind(refund_id)
+        .bind(payment_id)
+        .bind(merchant_uuid)
+        .bind(1000i64)
+        .bind("USD")
+        .bind(&refund_idem)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let refund_completed_event_id = new_uuid_v7();
+        sqlx::query(
+            r#"
+            INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+            VALUES ($1, 'refund.completed', 'refund', $2, $3, 1, $4)
+            "#,
+        )
+        .bind(refund_completed_event_id)
+        .bind(refund_id)
+        .bind(serde_json::json!({"refund_id": refund_id.to_string(), "payment_id": payment_id.to_string()}))
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE domain_event_id = $1 AND destination_url = $2",
+        )
+        .bind(refund_completed_event_id)
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            &format!("/api/v1/notifications/{notif_id}"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["resource_type"], "refund");
+        assert_eq!(body["resource_id"], refund_id.to_string());
+        assert_eq!(
+            body["resource_api_path"],
+            format!("/api/v1/refunds/{refund_id}")
+        );
+        assert_eq!(body["payment_id"], payment_id.to_string());
+        assert_eq!(
+            body["payment_api_path"],
+            format!("/api/v1/payments/{payment_id}")
+        );
+        assert_eq!(body["refund_id"], refund_id.to_string());
+        assert_eq!(
+            body["refund_api_path"],
+            format!("/api/v1/refunds/{refund_id}")
+        );
+    }
+
+    #[tokio::test]
+    async fn notification_list_items_include_navigation_fields() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let (_payment_id, payment_uuid) = create_pending_payment(&pool, 1000).await;
+        drain_projection(&pool).await;
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            "/api/v1/notifications",
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let items = body["items"].as_array().unwrap();
+        assert!(!items.is_empty());
+
+        let payment_items: Vec<_> = items
+            .iter()
+            .filter(|i| {
+                i["resource_type"] == "payment" && i["resource_id"] == payment_uuid.to_string()
+            })
+            .collect();
+        assert!(
+            !payment_items.is_empty(),
+            "should find payment event items in list"
+        );
+
+        for item in &payment_items {
+            assert!(item.get("resource_api_path").is_some());
+            assert!(item.get("payment_id").is_some());
+            assert!(item.get("payment_api_path").is_some());
+            assert!(item.get("refund_id").map_or(true, |v| v.is_null()));
+            assert!(item.get("refund_api_path").map_or(true, |v| v.is_null()));
+        }
+    }
 }
