@@ -60,4 +60,5 @@ pub mod actions {
     pub const REFUND_REJECTED: &str = "refund.rejected";
     pub const REFUND_COMPLETED: &str = "refund.completed";
     pub const RECONCILIATION_EXECUTED: &str = "reconciliation.executed";
+    pub const NOTIFICATION_RETRY_REQUESTED: &str = "notification.retry_requested";
 }

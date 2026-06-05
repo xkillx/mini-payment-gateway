@@ -1124,6 +1124,7 @@ name = "notifications"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "audit",
  "axum",
  "chrono",
  "reqwest",
@@ -1134,6 +1135,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "uuid",
+ "validator",
 ]
 
 [[package]]

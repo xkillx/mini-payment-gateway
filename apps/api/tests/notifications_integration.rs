@@ -10,6 +10,11 @@ use uuid::Uuid;
 
 use api::router;
 use notifications::repository::{NotificationRepository, PostgresNotificationRepository};
+use notifications::service::{
+    DefaultNotificationService, NotificationDeliveryPayload, NotificationDeliverySettings,
+    NotificationTransport,
+};
+use std::sync::{Arc, Mutex};
 
 const MERCHANT_ACTOR_ID: &str = "00000000-0000-0000-0000-000000000001";
 const SECRET: &str = "dev-secret-change-in-production";
@@ -606,58 +611,51 @@ async fn merchant_scoping_events_only_create_records_for_own_destinations() {
 // MPG-014 Notification Delivery Tests
 // -------------------------------------------------------------------------
 
+struct FakeTransport {
+    response_code: Arc<Mutex<u16>>,
+    captured_payloads: Arc<Mutex<Vec<NotificationDeliveryPayload>>>,
+}
+
+impl FakeTransport {
+    fn new(response_code: u16) -> Self {
+        Self {
+            response_code: Arc::new(Mutex::new(response_code)),
+            captured_payloads: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl NotificationTransport for FakeTransport {
+    fn deliver(
+        &self,
+        _destination_url: &str,
+        payload: &NotificationDeliveryPayload,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>> {
+        let code = *self.response_code.lock().unwrap();
+        self.captured_payloads.lock().unwrap().push(payload.clone());
+        Box::pin(async move { Ok(code) })
+    }
+}
+
+struct FailingTransport {
+    error: String,
+}
+
+impl NotificationTransport for FailingTransport {
+    fn deliver(
+        &self,
+        _destination_url: &str,
+        _payload: &NotificationDeliveryPayload,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>> {
+        let msg = self.error.clone();
+        Box::pin(async move { Err(msg) })
+    }
+}
+
 mod delivery_tests {
     use super::*;
     use notifications::repository::PostgresNotificationRepository;
-    use notifications::service::{
-        DefaultNotificationService, NotificationDeliveryPayload, NotificationDeliverySettings,
-        NotificationTransport,
-    };
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
-    struct FakeTransport {
-        response_code: Arc<Mutex<u16>>,
-        captured_payloads: Arc<Mutex<Vec<NotificationDeliveryPayload>>>,
-    }
-
-    impl FakeTransport {
-        fn new(response_code: u16) -> Self {
-            Self {
-                response_code: Arc::new(Mutex::new(response_code)),
-                captured_payloads: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-    }
-
-    impl NotificationTransport for FakeTransport {
-        fn deliver(
-            &self,
-            _destination_url: &str,
-            payload: &NotificationDeliveryPayload,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>>
-        {
-            let code = *self.response_code.lock().unwrap();
-            self.captured_payloads.lock().unwrap().push(payload.clone());
-            Box::pin(async move { Ok(code) })
-        }
-    }
-
-    struct FailingTransport {
-        error: String,
-    }
-
-    impl NotificationTransport for FailingTransport {
-        fn deliver(
-            &self,
-            _destination_url: &str,
-            _payload: &NotificationDeliveryPayload,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u16, String>> + Send + '_>>
-        {
-            let msg = self.error.clone();
-            Box::pin(async move { Err(msg) })
-        }
-    }
+    use notifications::service::{DefaultNotificationService, NotificationDeliverySettings};
 
     #[tokio::test]
     async fn successful_delivery_sends_full_payload_and_marks_delivered() {
@@ -685,12 +683,18 @@ mod delivery_tests {
         .unwrap();
 
         sqlx::query(
-            "DELETE FROM notification_delivery_records WHERE id != $1",
+            "DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1",
         )
         .bind(notif_id)
         .execute(&pool)
         .await
         .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let transport = FakeTransport::new(200);
         let repo = PostgresNotificationRepository::new(pool.clone());
@@ -755,6 +759,12 @@ mod delivery_tests {
         .await
         .unwrap();
 
+        sqlx::query("DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
         sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
             .bind(notif_id)
             .execute(&pool)
@@ -803,6 +813,12 @@ mod delivery_tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
 
         sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
             .bind(notif_id)
@@ -854,6 +870,12 @@ mod delivery_tests {
         .await
         .unwrap();
 
+        sqlx::query("DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
         sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
             .bind(notif_id)
             .execute(&pool)
@@ -882,12 +904,20 @@ mod delivery_tests {
         assert_eq!(record.0, "failed");
         assert_eq!(record.1, 1);
         assert_eq!(record.2, "http_status:503");
-        assert!(record.3.is_none(), "next_retry_at should be null on terminal failure");
+        assert!(
+            record.3.is_none(),
+            "next_retry_at should be null on terminal failure"
+        );
     }
 
     #[tokio::test]
     async fn stale_processing_record_is_reclaimed() {
         let pool = setup_db().await;
+        sqlx::query("DELETE FROM notification_delivery_attempts")
+            .execute(&pool)
+            .await
+            .unwrap();
+
         sqlx::query("DELETE FROM notification_delivery_records")
             .execute(&pool)
             .await
@@ -940,5 +970,616 @@ mod delivery_tests {
         assert!(record.1 >= 1, "attempt_count should be at least 1");
         assert!(record.2.is_none());
         assert!(record.3.is_none());
+    }
+}
+
+// -------------------------------------------------------------------------
+// MPG-015 Admin Notification Tests
+// -------------------------------------------------------------------------
+
+const ADMIN_ACTOR_ID: &str = "00000000-0000-0000-0000-000000000002";
+
+fn admin_token() -> String {
+    make_token(TestClaims {
+        sub: ADMIN_ACTOR_ID.into(),
+        role: "administrator".into(),
+        merchant_id: None,
+        exp: 9999999999,
+    })
+}
+
+async fn force_record_to_failed(pool: &PgPool, dest_url: &str) -> Uuid {
+    create_pending_payment(pool, 1000).await;
+    drain_projection(pool).await;
+
+    let notif_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+    )
+    .bind(dest_url)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1",
+    )
+    .bind(notif_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+        .bind(notif_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let repo = PostgresNotificationRepository::new(pool.clone());
+    let service = DefaultNotificationService::new(repo);
+    let settings = NotificationDeliverySettings::new(1, vec![]);
+    let transport = FakeTransport::new(503);
+
+    let outcome = service
+        .process_next_due_delivery(&transport, &settings)
+        .await
+        .unwrap()
+        .expect("should have claimed and failed");
+
+    assert!(
+        matches!(
+            outcome.status,
+            notifications::service::DeliveryStatus::TerminalFailed
+        ),
+        "expected terminal failure"
+    );
+
+    notif_id
+}
+
+mod admin_tests {
+    use super::*;
+    use notifications::repository::PostgresNotificationRepository;
+    use notifications::service::{DefaultNotificationService, NotificationDeliverySettings};
+
+    #[tokio::test]
+    async fn admin_list_notifications_returns_records_with_attempts() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            "/api/v1/notifications",
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let items = body["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "should return at least one notification");
+
+        let target = items
+            .iter()
+            .find(|i| i["id"].as_str().unwrap() == notif_id.to_string())
+            .expect("target notification should be in list");
+        assert_eq!(target["status"], "failed");
+        assert!(target["attempt_count"].as_i64().unwrap() >= 1);
+        assert!(target["retry_generation"].as_i64().unwrap() >= 0);
+        assert!(target["last_error"].as_str().unwrap_or("").contains("503"));
+        assert!(target["destination_url"]
+            .as_str()
+            .unwrap()
+            .contains("webhook"));
+
+        let attempts = target["attempts"].as_array().unwrap();
+        assert!(!attempts.is_empty(), "should have attempt history");
+        let attempt = &attempts[0];
+        assert_eq!(attempt["status"], "failed");
+        assert!(attempt["error"].as_str().unwrap_or("").contains("503"));
+    }
+
+    #[tokio::test]
+    async fn admin_list_notifications_filters_by_status() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        force_record_to_failed(&pool, &dest_url).await;
+
+        let mut app = build_app(pool.clone()).await;
+
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            "/api/v1/notifications?status=failed",
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let items = body["items"].as_array().unwrap();
+        for item in items {
+            assert_eq!(item["status"], "failed");
+        }
+
+        let (status2, body2) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            "/api/v1/notifications?status=delivered",
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status2, axum::http::StatusCode::OK);
+        for item in body2["items"].as_array().unwrap() {
+            assert_eq!(item["status"], "delivered");
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_get_notification_detail_returns_attempt_history() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            &format!("/api/v1/notifications/{notif_id}"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["id"], notif_id.to_string());
+        assert_eq!(body["status"], "failed");
+        assert!(body["event_type"].as_str().is_some());
+        assert!(body["resource_type"].as_str().is_some());
+        assert!(body["destination_url"].as_str().is_some());
+        assert!(body["attempts"].as_array().unwrap().len() >= 1);
+    }
+
+    #[tokio::test]
+    async fn admin_retry_failed_notification_requeues_and_audits() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let before: (String, i32, i32, Option<String>) = sqlx::query_as(
+            "SELECT status::text, attempt_count, retry_generation, last_error FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(before.0, "failed");
+        let prev_count = before.1;
+        let prev_gen = before.2;
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["id"], notif_id.to_string());
+        assert_eq!(body["status"], "pending");
+        assert_eq!(
+            body["retry_generation"].as_i64().unwrap(),
+            (prev_gen + 1) as i64
+        );
+        assert_eq!(body["attempt_count"].as_i64().unwrap(), prev_count as i64);
+        assert!(body["last_error"].as_str().is_some());
+
+        let after: (String, i32, i32) = sqlx::query_as(
+            "SELECT status::text, attempt_count, retry_generation FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(after.0, "pending");
+        assert_eq!(after.2, prev_gen + 1);
+
+        let audit: (String, String) = sqlx::query_as(
+            "SELECT action, resource_id FROM audit_records WHERE action = 'notification.retry_requested' AND resource_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(notif_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audit.0, "notification.retry_requested");
+        assert_eq!(audit.1, notif_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn admin_retry_non_failed_notification_returns_409() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 1000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+        )
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let before: (String,) =
+            sqlx::query_as("SELECT status::text FROM notification_delivery_records WHERE id = $1")
+                .bind(notif_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(before.0, "pending");
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, _body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+
+        let after: (String,) =
+            sqlx::query_as("SELECT status::text FROM notification_delivery_records WHERE id = $1")
+                .bind(notif_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after.0, "pending", "status should not change on conflict");
+    }
+
+    #[tokio::test]
+    async fn admin_retry_unknown_notification_returns_404() {
+        let pool = setup_db().await;
+        let mut app = build_app(pool.clone()).await;
+
+        let fake_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+        let (status, _body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{fake_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn merchant_cannot_list_get_or_retry_notifications() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let mut app = build_app(pool.clone()).await;
+
+        let (list_status, _) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            "/api/v1/notifications",
+            &merchant_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(list_status, axum::http::StatusCode::FORBIDDEN);
+
+        let (detail_status, _) = send_request(
+            &mut app,
+            axum::http::Method::GET,
+            &format!("/api/v1/notifications/{notif_id}"),
+            &merchant_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(detail_status, axum::http::StatusCode::FORBIDDEN);
+
+        let (retry_status, _) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &merchant_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(retry_status, axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn retry_request_does_not_create_attempt_row_until_worker_runs() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let attempts_before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_delivery_attempts WHERE notification_delivery_record_id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, _body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::OK);
+
+        let attempts_after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_delivery_attempts WHERE notification_delivery_record_id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            attempts_before, attempts_after,
+            "retry request should not create new attempt rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_retry_generation_gets_fresh_budget_without_resetting_attempt_count() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, _body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+
+        let record: (i32, i32) = sqlx::query_as(
+            "SELECT attempt_count, retry_generation FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, 1, "attempt_count should not reset");
+        assert_eq!(record.1, 1, "retry_generation should be 1");
+
+        let service =
+            DefaultNotificationService::new(PostgresNotificationRepository::new(pool.clone()));
+        let transport = FakeTransport::new(200);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should claim requeued record");
+
+        assert_eq!(outcome.attempt_number, 2);
+        assert!(
+            matches!(
+                outcome.status,
+                notifications::service::DeliveryStatus::Delivered
+            ),
+            "should deliver in new generation"
+        );
+    }
+
+    #[tokio::test]
+    async fn success_after_retry_clears_last_error_but_preserves_failed_attempt_rows() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        let notif_id = force_record_to_failed(&pool, &dest_url).await;
+
+        let failed_attempt_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_delivery_attempts WHERE notification_delivery_record_id = $1 AND status = 'failed'",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(failed_attempt_count >= 1);
+
+        let mut app = build_app(pool.clone()).await;
+        let (status, _body) = send_request(
+            &mut app,
+            axum::http::Method::POST,
+            &format!("/api/v1/notifications/{notif_id}/retry"),
+            &admin_token(),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+
+        let service =
+            DefaultNotificationService::new(PostgresNotificationRepository::new(pool.clone()));
+        let transport = FakeTransport::new(200);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("should deliver");
+
+        let record: (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, last_error FROM notification_delivery_records WHERE id = $1",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(record.0, "delivered");
+        assert!(
+            record.1.is_none(),
+            "last_error should be cleared on success"
+        );
+
+        let failed_still_there: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_delivery_attempts WHERE notification_delivery_record_id = $1 AND status = 'failed'",
+        )
+        .bind(notif_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            failed_still_there, failed_attempt_count,
+            "prior failed attempt rows should be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_processing_attempt_is_marked_failed_before_reclaim() {
+        let pool = setup_db().await;
+        let merchant_uuid = Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap();
+        let dest_url = unique_dest_url();
+        set_active_destination(&pool, merchant_uuid, &dest_url).await;
+
+        create_pending_payment(&pool, 1000).await;
+        drain_projection(&pool).await;
+
+        let notif_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM notification_delivery_records WHERE destination_url = $1 LIMIT 1",
+        )
+        .bind(&dest_url)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_attempts WHERE notification_delivery_record_id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("DELETE FROM notification_delivery_records WHERE id != $1")
+            .bind(notif_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let attempt_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext));
+        let stale_time = chrono::Utc::now() - chrono::Duration::minutes(10);
+        sqlx::query(
+            "INSERT INTO notification_delivery_attempts (id, notification_delivery_record_id, retry_generation, attempt_number, status, started_at, created_at, updated_at) VALUES ($1, $2, 0, 1, 'processing', $3, $3, $3)",
+        )
+        .bind(attempt_id)
+        .bind(notif_id)
+        .bind(stale_time)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "UPDATE notification_delivery_records SET status = 'processing', attempt_count = 1, last_attempt_at = $2, retry_generation = 0 WHERE id = $1",
+        )
+        .bind(notif_id)
+        .bind(stale_time)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let service =
+            DefaultNotificationService::new(PostgresNotificationRepository::new(pool.clone()));
+        let transport = FakeTransport::new(200);
+        let settings = NotificationDeliverySettings::new(3, vec![1, 2]);
+
+        let outcome = service
+            .process_next_due_delivery(&transport, &settings)
+            .await
+            .unwrap()
+            .expect("stale record should be reclaimed");
+
+        let stale_attempt: (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, error FROM notification_delivery_attempts WHERE id = $1",
+        )
+        .bind(attempt_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(stale_attempt.0, "failed");
+        assert_eq!(
+            stale_attempt.1.as_deref(),
+            Some("stale_processing_reclaimed"),
+            "stale attempt should be marked failed"
+        );
+
+        assert_eq!(outcome.attempt_number, 2);
+        assert!(
+            matches!(
+                outcome.status,
+                notifications::service::DeliveryStatus::Delivered
+            ),
+            "new attempt should deliver"
+        );
     }
 }

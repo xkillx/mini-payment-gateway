@@ -213,7 +213,10 @@ impl<R: NotificationRepository + 'static> DefaultNotificationService<R> {
     ) -> Result<Option<NotificationDeliveryOutcome>, NotificationDeliveryServiceError> {
         let stale_before = Utc::now() - settings.stale_processing_after;
 
-        let claimed = self.repo.claim_due_for_delivery(stale_before).await?;
+        let claimed = self
+            .repo
+            .claim_due_for_delivery(stale_before, settings.max_attempts)
+            .await?;
         let Some(claimed) = claimed else {
             return Ok(None);
         };
@@ -222,40 +225,49 @@ impl<R: NotificationRepository + 'static> DefaultNotificationService<R> {
 
         let delivery_result = transport.deliver(&claimed.destination_url, &payload).await;
 
-        let new_attempt = (claimed.attempt_count + 1) as u32;
         let is_success = delivery_result
             .as_ref()
             .map(|status| (200..300).contains(status))
             .unwrap_or(false);
 
         if is_success {
-            let _record = self.repo.mark_delivery_delivered(claimed.id).await?;
+            let http_status = delivery_result.as_ref().map(|s| *s as i32).ok();
+            let _record = self
+                .repo
+                .mark_delivery_attempt_delivered(claimed.id, claimed.attempt_id, http_status)
+                .await?;
             return Ok(Some(NotificationDeliveryOutcome {
                 record_id: claimed.id,
                 destination_url: claimed.destination_url,
                 event_type: claimed.event_type,
-                attempt_number: new_attempt,
+                attempt_number: claimed.attempt_number as u32,
                 status: DeliveryStatus::Delivered,
                 next_retry_at: None,
                 last_error: None,
             }));
         }
 
+        let http_status = delivery_result.as_ref().map(|s| *s as i32).ok();
         let last_error = match &delivery_result {
             Ok(status) => build_last_error(Some(*status), None),
             Err(msg) => build_last_error(None, Some(msg)),
         };
 
-        if new_attempt >= settings.max_attempts {
+        if claimed.generation_attempt_number >= settings.max_attempts {
             let _record = self
                 .repo
-                .mark_delivery_failed(claimed.id, &last_error)
+                .mark_delivery_attempt_failed_terminal(
+                    claimed.id,
+                    claimed.attempt_id,
+                    http_status,
+                    &last_error,
+                )
                 .await?;
             return Ok(Some(NotificationDeliveryOutcome {
                 record_id: claimed.id,
                 destination_url: claimed.destination_url,
                 event_type: claimed.event_type,
-                attempt_number: new_attempt,
+                attempt_number: claimed.attempt_number as u32,
                 status: DeliveryStatus::TerminalFailed,
                 next_retry_at: None,
                 last_error: Some(last_error),
@@ -264,21 +276,27 @@ impl<R: NotificationRepository + 'static> DefaultNotificationService<R> {
 
         let delay_secs = settings
             .retry_delays_secs
-            .get((new_attempt - 1) as usize)
+            .get((claimed.generation_attempt_number - 1) as usize)
             .copied()
             .unwrap_or(3600);
         let next_retry_at = Utc::now() + Duration::seconds(delay_secs as i64);
 
         let _record = self
             .repo
-            .mark_delivery_pending_retry(claimed.id, next_retry_at, &last_error)
+            .mark_delivery_attempt_failed_pending_retry(
+                claimed.id,
+                claimed.attempt_id,
+                http_status,
+                &last_error,
+                next_retry_at,
+            )
             .await?;
 
         Ok(Some(NotificationDeliveryOutcome {
             record_id: claimed.id,
             destination_url: claimed.destination_url,
             event_type: claimed.event_type,
-            attempt_number: new_attempt,
+            attempt_number: claimed.attempt_number as u32,
             status: DeliveryStatus::PendingRetry,
             next_retry_at: Some(next_retry_at),
             last_error: Some(last_error),
@@ -320,12 +338,16 @@ mod tests {
             domain_event_id: Uuid::parse_str("a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d").unwrap(),
             destination_url: "https://example.com/webhook".into(),
             attempt_count: 0,
+            retry_generation: 0,
             event_type: "refund.created".into(),
             aggregate_type: "refund".into(),
             aggregate_id: Uuid::parse_str("b2c3d4e5-f6a5-4b9c-8d0e-1f2a3b4c5d6e").unwrap(),
             payload: json!({"refund_id": "123"}),
             event_created_at: Utc::now(),
             version: 1,
+            attempt_id: Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)),
+            attempt_number: 1,
+            generation_attempt_number: 1,
         };
         let payload = NotificationDeliveryPayload::from_claimed(&claimed);
         assert_eq!(payload.event_type, "refund.created");

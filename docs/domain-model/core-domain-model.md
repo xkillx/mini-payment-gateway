@@ -133,12 +133,12 @@ pending  →  processing  →  completed
 
 | Status | Description |
 |---|---|
-| `pending` | Awaiting first delivery attempt |
+| `pending` | Awaiting first or next due delivery attempt |
 | `processing` | Delivery attempt is in progress |
 | `delivered` | Successfully delivered to destination |
 | `failed` | All delivery attempts exhausted |
 
-Transitions: `pending → processing → delivered | failed`
+Transitions: `pending → processing → delivered | pending | failed`; `processing → pending` schedules another automatic attempt, and `failed → pending` is allowed only as an Administrator retry override.
 
 ### 2.4 Reconciliation Status
 

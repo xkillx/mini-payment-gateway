@@ -141,6 +141,10 @@ The worker sends the persisted Domain Event envelope as a JSON `POST` to the Not
 
 Delivery is at-least-once. Merchants should deduplicate using `event_id`. Only a `2xx` response marks delivery as successful. Non-`2xx` responses and transport errors are recorded as `last_error` on the notification delivery record and trigger retry or terminal failure per the configured `NOTIFICATION_MAX_ATTEMPTS` and `NOTIFICATION_RETRY_DELAYS_SECS`.
 
+Each delivery attempt is persisted as a `notification_delivery_attempts` row with its outcome, HTTP status, and errors. `last_error` on the record reflects the latest delivery error only; historical failures are preserved in attempt rows.
+
+Automatic retries are bounded per retry generation (not by lifetime `attempt_count`). When an Administrator retries a failed record via the API, the record is requeued (`failed` → `pending`), `retry_generation` increments by one, and a fresh automatic delivery budget begins for the new generation. Cumulative `attempt_count` and prior attempt rows are preserved across generations.
+
 
 ## Testing
 

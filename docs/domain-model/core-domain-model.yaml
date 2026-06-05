@@ -299,6 +299,10 @@ transitions:
       precondition: "Delivery attempt is claimed"
       side_effect: "Begin delivery attempt"
     - from: processing
+      to: pending
+      precondition: "Delivery attempt failed but more automatic attempts remain"
+      side_effect: "Record last error and schedule the next retry"
+    - from: processing
       to: delivered
       precondition: "Delivery attempt succeeded"
       side_effect: "Record delivery timestamp"
@@ -306,6 +310,10 @@ transitions:
       to: failed
       precondition: "All delivery attempts exhausted"
       side_effect: "Record last error"
+    - from: failed
+      to: pending
+      precondition: "Administrator retry override requested"
+      side_effect: "Requeue delivery for another attempt"
 
 invariants:
   - id: I-1

@@ -327,13 +327,75 @@ paths:
       summary: List notification delivery records (Administrator only)
       security:
         - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/NotificationStatus"
+          description: Filter by exact Notification Status
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of items to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of items to skip
       responses:
+        "200":
+          description: Paginated list of Notification Delivery Records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/notifications/{id}:
+    get:
+      operationId: getNotificationDetail
+      summary: Get notification delivery record detail (Administrator only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Notification Delivery Record ID
+      responses:
+        "200":
+          description: Notification Delivery Record detail with attempt history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeliveryRecordDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/notifications/{id}/retry:
     post:
@@ -348,13 +410,31 @@ paths:
           schema:
             type: string
             format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+          description: No request body is required for MVP
       responses:
+        "200":
+          description: Notification requeued successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeliveryRecordDetail"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/reconciliation:
     get:
@@ -878,6 +958,160 @@ components:
         - delivered
         - failed
       description: Current status of a Notification Delivery Record
+
+    NotificationAttemptStatus:
+      type: string
+      enum:
+        - processing
+        - delivered
+        - failed
+      description: Status of a single Notification Delivery Attempt
+
+    NotificationDeliveryAttempt:
+      type: object
+      required:
+        - id
+        - notification_delivery_record_id
+        - retry_generation
+        - attempt_number
+        - status
+        - started_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Attempt ID
+        notification_delivery_record_id:
+          type: string
+          format: uuid
+          description: Owning Notification Delivery Record ID
+        retry_generation:
+          type: integer
+          description: Retry generation at the time of this attempt
+        attempt_number:
+          type: integer
+          description: Cumulative attempt number across record lifetime
+        status:
+          $ref: "#/components/schemas/NotificationAttemptStatus"
+        http_status_code:
+          type: integer
+          nullable: true
+          description: HTTP status code returned by the destination (null on transport errors)
+        error:
+          type: string
+          nullable: true
+          description: Operational delivery error (null on success)
+        started_at:
+          type: string
+          format: date-time
+          description: When this attempt started
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When this attempt finished (null while processing)
+        created_at:
+          type: string
+          format: date-time
+          description: When the attempt record was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the attempt record was last updated
+
+    NotificationDeliveryRecordDetail:
+      type: object
+      required:
+        - id
+        - domain_event_id
+        - event_type
+        - resource_type
+        - resource_id
+        - destination_url
+        - status
+        - attempt_count
+        - retry_generation
+        - created_at
+        - updated_at
+        - attempts
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Notification Delivery Record ID
+        domain_event_id:
+          type: string
+          format: uuid
+          description: Domain Event this record delivers
+        event_type:
+          type: string
+          description: Type of the related Domain Event
+        resource_type:
+          type: string
+          description: Aggregate type from the Domain Event
+        resource_id:
+          type: string
+          format: uuid
+          description: Aggregate ID from the Domain Event
+        destination_url:
+          type: string
+          format: uri
+          description: Webhook destination URL
+        status:
+          $ref: "#/components/schemas/NotificationStatus"
+        attempt_count:
+          type: integer
+          description: Cumulative lifetime delivery attempts
+        retry_generation:
+          type: integer
+          description: Current retry generation (incremented on admin retry)
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When delivery was last attempted
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the next retry is scheduled
+        last_error:
+          type: string
+          nullable: true
+          description: Latest operational delivery error
+        created_at:
+          type: string
+          format: date-time
+          description: When the record was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the record was last updated
+        attempts:
+          type: array
+          description: Ordered delivery attempts (oldest first)
+          items:
+            $ref: "#/components/schemas/NotificationDeliveryAttempt"
+
+    NotificationListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationDeliveryRecordDetail"
+        limit:
+          type: integer
+          description: Maximum number of items returned
+        offset:
+          type: integer
+          description: Number of items skipped
 
     PaymentStatusHistoryEntry:
       type: object
