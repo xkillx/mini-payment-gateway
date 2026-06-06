@@ -1040,3 +1040,464 @@ async fn reconciliation_audit_record_has_correct_details() {
     assert_eq!(audit_rows[0].4["discrepancy_minor"], 0);
     assert_eq!(audit_rows[0].4["notes"], "Q1 audit");
 }
+
+#[tokio::test]
+async fn admin_can_list_reconciliation_reports() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day1 = next_test_day();
+    let day2 = next_test_day();
+    let (ws1, we1) = test_window(day1);
+    let (ws2, we2) = test_window(day2);
+
+    let payment_id = new_uuid_v7();
+    seed_payment_successful(&pool, payment_id, 500, "USD", &test_event_at(day1)).await;
+    send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws1,
+            "window_end": we1,
+            "actual_total_minor": 500
+        })),
+    )
+    .await;
+
+    seed_payment_successful(&pool, new_uuid_v7(), 300, "USD", &test_event_at(day2)).await;
+    send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws2,
+            "window_end": we2,
+            "actual_total_minor": 300
+        })),
+    )
+    .await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert!(
+        items.len() >= 2,
+        "expected at least 2 items, got {}",
+        items.len()
+    );
+    assert_eq!(body["limit"], 50);
+    assert_eq!(body["offset"], 0);
+
+    let first = &items[0];
+    assert!(first["id"].as_str().unwrap().len() > 0);
+    assert!(first["status"].as_str().unwrap().len() > 0);
+    assert_eq!(first["currency"], "USD");
+    assert!(first["run_at"].as_str().unwrap().len() > 0);
+    assert!(first["created_at"].as_str().unwrap().len() > 0);
+}
+
+#[tokio::test]
+async fn list_reconciliation_reports_supports_pagination() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day1 = next_test_day();
+    let day2 = next_test_day();
+    let (ws1, we1) = test_window(day1);
+    let (ws2, we2) = test_window(day2);
+
+    seed_payment_successful(&pool, new_uuid_v7(), 100, "USD", &test_event_at(day1)).await;
+    send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws1,
+            "window_end": we1,
+            "actual_total_minor": 100
+        })),
+    )
+    .await;
+
+    seed_payment_successful(&pool, new_uuid_v7(), 200, "USD", &test_event_at(day2)).await;
+    send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws2,
+            "window_end": we2,
+            "actual_total_minor": 200
+        })),
+    )
+    .await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation?limit=1&offset=1",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(body["limit"], 1);
+    assert_eq!(body["offset"], 1);
+}
+
+#[tokio::test]
+async fn merchant_cannot_list_reconciliation_reports() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation",
+        &merchant_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "FORBIDDEN");
+}
+
+#[tokio::test]
+async fn admin_can_open_matched_report_with_contributing_records() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day = next_test_day();
+    let (ws, we) = test_window(day);
+
+    let payment_id = new_uuid_v7();
+    seed_payment_successful(&pool, payment_id, 1000, "USD", &test_event_at(day)).await;
+
+    let refund_id = new_uuid_v7();
+    seed_refund_completed(
+        &pool,
+        refund_id,
+        payment_id,
+        300,
+        "USD",
+        &test_event_at(day),
+    )
+    .await;
+
+    let (post_status, post_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws,
+            "window_end": we,
+            "actual_total_minor": 700
+        })),
+    )
+    .await;
+
+    assert_eq!(post_status, axum::http::StatusCode::CREATED);
+    let id = post_body["id"].as_str().unwrap();
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/reconciliation/{id}"),
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["id"], id);
+    assert_eq!(body["status"], "matched");
+    assert_eq!(body["expected_total_minor"], 700);
+    assert_eq!(body["actual_total_minor"], 700);
+    assert_eq!(body["discrepancy_minor"], 0);
+    assert_eq!(body["currency"], "USD");
+    assert_eq!(body["included_payment_total_minor"], 1000);
+    assert_eq!(body["included_refund_total_minor"], 300);
+    assert_eq!(body["included_record_count"], 2);
+
+    let payments = body["included_payments"].as_array().unwrap();
+    assert_eq!(payments.len(), 1);
+    assert_eq!(payments[0]["payment_id"], payment_id.to_string());
+    assert_eq!(payments[0]["amount_minor"], 1000);
+
+    let refunds = body["included_refunds"].as_array().unwrap();
+    assert_eq!(refunds.len(), 1);
+    assert_eq!(refunds[0]["refund_id"], refund_id.to_string());
+    assert_eq!(refunds[0]["payment_id"], payment_id.to_string());
+    assert_eq!(refunds[0]["amount_minor"], 300);
+}
+
+#[tokio::test]
+async fn mismatched_report_detail_still_shows_contributing_records() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day = next_test_day();
+    let (ws, we) = test_window(day);
+
+    let payment_id = new_uuid_v7();
+    seed_payment_successful(&pool, payment_id, 500, "USD", &test_event_at(day)).await;
+
+    let (post_status, post_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws,
+            "window_end": we,
+            "actual_total_minor": 1000
+        })),
+    )
+    .await;
+
+    assert_eq!(post_status, axum::http::StatusCode::CREATED);
+    assert_eq!(post_body["status"], "mismatched");
+    let id = post_body["id"].as_str().unwrap();
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/reconciliation/{id}"),
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body["status"], "mismatched");
+    assert_eq!(body["discrepancy_minor"], 500);
+    assert_eq!(body["included_payments"].as_array().unwrap().len(), 1);
+    assert_eq!(body["included_refunds"].as_array().unwrap().len(), 0);
+    assert_eq!(body["included_payment_total_minor"], 500);
+    assert_eq!(body["included_record_count"], 1);
+}
+
+#[tokio::test]
+async fn report_detail_excludes_records_outside_window_or_wrong_event_type() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day = next_test_day();
+    let (ws, we) = test_window(day);
+
+    let included_payment = new_uuid_v7();
+    seed_payment_successful(&pool, included_payment, 1000, "USD", &ws).await;
+
+    let excluded_payment = new_uuid_v7();
+    seed_payment_successful(&pool, excluded_payment, 2000, "USD", &we).await;
+
+    let failed_payment = new_uuid_v7();
+    seed_payment_failed(&pool, failed_payment, 500, "USD", &test_event_at(day)).await;
+
+    let refund_created_id = new_uuid_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO refunds (id, payment_id, merchant_id, amount_minor, currency, status, idempotency_key, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW(), NOW())
+        "#,
+    )
+    .bind(refund_created_id)
+    .bind(included_payment)
+    .bind(Uuid::parse_str(MERCHANT_ACTOR_ID).unwrap())
+    .bind(300i64)
+    .bind("USD")
+    .bind(format!("ik-{}", refund_created_id))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO domain_events (id, event_type, aggregate_type, aggregate_id, payload, version, created_at)
+        VALUES ($1, 'refund.created', 'refund', $2, $3, 1, $4)
+        "#,
+    )
+    .bind(new_uuid_v7())
+    .bind(refund_created_id)
+    .bind(
+        json!({
+            "refund_id": refund_created_id.to_string(),
+            "payment_id": included_payment.to_string(),
+            "merchant_id": MERCHANT_ACTOR_ID,
+            "amount_minor": 300,
+            "currency": "USD",
+        }),
+    )
+    .bind(
+        chrono::DateTime::parse_from_rfc3339(&test_event_at(day))
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (post_status, post_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws,
+            "window_end": we,
+            "actual_total_minor": 1000
+        })),
+    )
+    .await;
+
+    assert_eq!(post_status, axum::http::StatusCode::CREATED);
+    let id = post_body["id"].as_str().unwrap();
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/reconciliation/{id}"),
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let payments = body["included_payments"].as_array().unwrap();
+    assert_eq!(payments.len(), 1);
+    assert_eq!(payments[0]["payment_id"], included_payment.to_string());
+
+    let refunds = body["included_refunds"].as_array().unwrap();
+    assert_eq!(refunds.len(), 0);
+}
+
+#[tokio::test]
+async fn merchant_cannot_open_reconciliation_report() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+    let day = next_test_day();
+    let (ws, we) = test_window(day);
+
+    seed_payment_successful(&pool, new_uuid_v7(), 100, "USD", &test_event_at(day)).await;
+    let (post_status, post_body) = send_request(
+        &mut app,
+        axum::http::Method::POST,
+        "/api/v1/reconciliation",
+        &admin_token(),
+        Some(json!({
+            "currency": "USD",
+            "window_start": ws,
+            "window_end": we,
+            "actual_total_minor": 100
+        })),
+    )
+    .await;
+
+    assert_eq!(post_status, axum::http::StatusCode::CREATED);
+    let id = post_body["id"].as_str().unwrap();
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/reconciliation/{id}"),
+        &merchant_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "FORBIDDEN");
+}
+
+#[tokio::test]
+async fn missing_report_returns_404() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let non_existent_id = new_uuid_v7();
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &format!("/api/v1/reconciliation/{non_existent_id}"),
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "NOT_FOUND");
+}
+
+#[tokio::test]
+async fn list_reconciliation_reports_invalid_limit_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation?limit=0",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn list_reconciliation_reports_limit_over_max_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation?limit=201",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn list_reconciliation_reports_negative_offset_returns_422() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/reconciliation?offset=-1",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
+}

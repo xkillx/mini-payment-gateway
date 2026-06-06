@@ -2,7 +2,9 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{Reconciliation, ReconciliationStatus};
+use crate::models::{
+    Reconciliation, ReconciliationListResponse, ReconciliationReportResponse, ReconciliationStatus,
+};
 use crate::repository::{PostgresReconciliationRepository, ReconciliationRepository};
 
 pub trait ReconciliationService: Send + Sync {
@@ -142,6 +144,75 @@ pub async fn run_manual_reconciliation(
     tx.commit().await?;
 
     Ok(stored)
+}
+
+pub async fn list_reconciliation_reports(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> Result<ReconciliationListResponse, sqlx::Error> {
+    let items = PostgresReconciliationRepository::new(pool.clone())
+        .find_page(limit, offset)
+        .await?;
+
+    Ok(ReconciliationListResponse {
+        items,
+        limit,
+        offset,
+    })
+}
+
+pub async fn get_reconciliation_report(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<ReconciliationReportResponse>, sqlx::Error> {
+    let reconciliation = PostgresReconciliationRepository::new(pool.clone())
+        .find_by_id(id)
+        .await?;
+
+    let reconciliation = match reconciliation {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let included_payments = PostgresReconciliationRepository::find_included_payments(
+        pool,
+        &reconciliation.currency,
+        reconciliation.window_start,
+        reconciliation.window_end,
+    )
+    .await?;
+
+    let included_refunds = PostgresReconciliationRepository::find_included_refunds(
+        pool,
+        &reconciliation.currency,
+        reconciliation.window_start,
+        reconciliation.window_end,
+    )
+    .await?;
+
+    let included_payment_total_minor: i64 = included_payments.iter().map(|p| p.amount_minor).sum();
+    let included_refund_total_minor: i64 = included_refunds.iter().map(|r| r.amount_minor).sum();
+    let included_record_count = (included_payments.len() + included_refunds.len()) as i64;
+
+    Ok(Some(ReconciliationReportResponse {
+        id: reconciliation.id,
+        status: reconciliation.status,
+        expected_total_minor: reconciliation.expected_total_minor,
+        actual_total_minor: reconciliation.actual_total_minor,
+        discrepancy_minor: reconciliation.discrepancy_minor,
+        currency: reconciliation.currency,
+        window_start: reconciliation.window_start,
+        window_end: reconciliation.window_end,
+        notes: reconciliation.notes,
+        run_at: reconciliation.run_at,
+        created_at: reconciliation.created_at,
+        included_payment_total_minor,
+        included_refund_total_minor,
+        included_record_count,
+        included_payments,
+        included_refunds,
+    }))
 }
 
 async fn insert_error_reconciliation(

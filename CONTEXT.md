@@ -105,7 +105,7 @@ Reconciliation Status expresses the outcome of a Reconciliation run: matched, mi
 _Avoid_: Reconciliation processing state
 
 **Reconciliation Report**:
-A Reconciliation Report is the administrator-facing detail view of a Reconciliation and any identifiable mismatched records.
+A Reconciliation Report is the administrator-facing detail view of a Reconciliation and any identifiable mismatched records. In MVP, identifiable mismatched records means the gateway-side Payments and Refunds included in the Reconciliation Window, not records proven to disagree with an external line-item source.
 _Avoid_: Manual reconciliation run, settlement file
 
 **Audit Record**:
@@ -185,6 +185,7 @@ _Avoid_: System user, service account
 - A **Reconciliation Window** is expressed as exact timestamp instants, not business dates or timezone-specific calendar days.
 - An **Actual Reconciliation Total** is a net amount in minor units after refunds are subtracted. It may be zero or negative.
 - **Manual Reconciliation** produces a run-level Reconciliation result. Item-level mismatch detail belongs to a **Reconciliation Report**.
+- "Mismatched records" in MPG-018 means gateway-side included Payments and Refunds that explain the Expected Reconciliation Total; it does not imply external line-item matching in MVP.
 - A valid accepted **Manual Reconciliation** should create a **Reconciliation** even when the comparison cannot complete, using **Reconciliation Status** `error` when possible. Invalid requests are rejected without creating a Reconciliation.
 - A **Reconciliation** is matched only when the discrepancy is exactly zero minor units; any non-zero discrepancy is mismatched.
 - Every accepted **Manual Reconciliation** that creates a **Reconciliation** must also create an **Audit Record** that references that Reconciliation.

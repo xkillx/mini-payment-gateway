@@ -1,20 +1,29 @@
-use axum::extract::{Extension, Json, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::{http::StatusCode, Router};
+use axum::{http::StatusCode, Json, Router};
+use serde::Deserialize;
 use serde_json::json;
 use shared_auth::Actor;
 use shared_http::error::{AppError, ErrorEnvelope};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::RunReconciliationRequest;
+use crate::models::{
+    ReconciliationListResponse, ReconciliationReportResponse, RunReconciliationRequest,
+};
 use crate::service;
 
 #[derive(Clone)]
 struct RouteState {
     pool: PgPool,
     payment_currency: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReconciliationListQuery {
+    limit: Option<i64>,
+    offset: Option<i64>,
 }
 
 pub fn routes(pool: PgPool, payment_currency: String) -> Router {
@@ -25,11 +34,49 @@ pub fn routes(pool: PgPool, payment_currency: String) -> Router {
 
     Router::new()
         .route("/", get(list_reconciliations).post(run_reconciliation))
+        .route("/{id}", get(get_reconciliation_report))
         .with_state(state)
 }
 
-async fn list_reconciliations() -> impl IntoResponse {
-    AppError::NotImplemented("reconciliation.list")
+fn invalid_param(field: &'static str) -> AppError {
+    let mut errors = validator::ValidationErrors::new();
+    errors.add(field, validator::ValidationError::new("invalid"));
+    AppError::Validation(errors)
+}
+
+async fn list_reconciliations(
+    State(state): State<RouteState>,
+    Query(query): Query<ReconciliationListQuery>,
+) -> Result<Json<ReconciliationListResponse>, AppError> {
+    let limit = query.limit.unwrap_or(50);
+    let offset = query.offset.unwrap_or(0);
+
+    if !(1..=200).contains(&limit) {
+        return Err(invalid_param("limit"));
+    }
+    if offset < 0 {
+        return Err(invalid_param("offset"));
+    }
+
+    let response = service::list_reconciliation_reports(&state.pool, limit, offset)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(response))
+}
+
+async fn get_reconciliation_report(
+    State(state): State<RouteState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ReconciliationReportResponse>, AppError> {
+    let report = service::get_reconciliation_report(&state.pool, id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    match report {
+        Some(r) => Ok(Json(r)),
+        None => Err(AppError::NotFound("Reconciliation report not found".into())),
+    }
 }
 
 async fn run_reconciliation(
@@ -37,19 +84,6 @@ async fn run_reconciliation(
     Extension(actor): Extension<Actor>,
     body: Result<Json<RunReconciliationRequest>, axum::extract::rejection::JsonRejection>,
 ) -> impl IntoResponse {
-    if !actor.is_administrator() {
-        let request_id = Uuid::new_v7(uuid::Timestamp::now(uuid::NoContext)).to_string();
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ErrorEnvelope::new(
-                "FORBIDDEN",
-                "Only administrators can run reconciliation",
-                &request_id,
-            )),
-        )
-            .into_response();
-    }
-
     let body = match body {
         Ok(Json(req)) => req,
         Err(rejection) => {

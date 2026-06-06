@@ -440,15 +440,43 @@ paths:
     get:
       operationId: listReconciliations
       summary: List reconciliation records (Administrator only)
+      description: |
+        Returns a paginated list of historical Reconciliation records ordered by
+        `created_at DESC, id DESC`. Each item is a summary-level record without
+        contributing Payment or Refund detail.
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of records to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of records to skip
       responses:
+        "200":
+          description: List of reconciliation records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
     post:
       operationId: runReconciliation
       summary: Run a reconciliation (Administrator only)
@@ -473,6 +501,44 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/reconciliation/{id}:
+    get:
+      operationId: getReconciliationReport
+      summary: Get a reconciliation report (Administrator only)
+      description: |
+        Returns the stored Reconciliation summary plus the gateway-side
+        Payments and Refunds that contributed to the Expected Reconciliation Total
+        for the stored Reconciliation Window and currency.
+
+        Contributing records are derived from `payment.successful` and
+        `refund.completed` Domain Events whose `created_at` falls within the
+        inclusive-start, exclusive-end Reconciliation Window.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Reconciliation ID
+      responses:
+        "200":
+          description: Reconciliation report with contributing records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReportResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1509,3 +1575,163 @@ components:
           type: string
           format: date-time
           description: When this Reconciliation record was persisted
+
+    ReconciliationListResponse:
+      type: object
+      required:
+        - items
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconciliationResponse"
+          description: List of reconciliation summary records
+        limit:
+          type: integer
+          description: Requested page size
+          example: 50
+        offset:
+          type: integer
+          description: Requested page offset
+          example: 0
+
+    ReconciliationReportResponse:
+      type: object
+      required:
+        - id
+        - status
+        - expected_total_minor
+        - actual_total_minor
+        - discrepancy_minor
+        - currency
+        - window_start
+        - window_end
+        - run_at
+        - created_at
+        - included_payment_total_minor
+        - included_refund_total_minor
+        - included_record_count
+        - included_payments
+        - included_refunds
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/ReconciliationStatus"
+        expected_total_minor:
+          type: integer
+        actual_total_minor:
+          type: integer
+        discrepancy_minor:
+          type: integer
+        currency:
+          type: string
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          nullable: true
+        run_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        included_payment_total_minor:
+          type: integer
+          description: Sum of included Payment amounts in minor units
+        included_refund_total_minor:
+          type: integer
+          description: Sum of included Refund amounts in minor units
+        included_record_count:
+          type: integer
+          description: Total count of included records (payments + refunds)
+        included_payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncludedPaymentRecord"
+        included_refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncludedRefundRecord"
+
+    IncludedPaymentRecord:
+      type: object
+      required:
+        - domain_event_id
+        - payment_id
+        - merchant_id
+        - amount_minor
+        - currency
+        - occurred_at
+      properties:
+        domain_event_id:
+          type: string
+          format: uuid
+          description: ID of the payment.successful Domain Event
+        payment_id:
+          type: string
+          format: uuid
+          description: Payment ID
+        merchant_id:
+          type: string
+          format: uuid
+          description: Owning Merchant Account ID
+        amount_minor:
+          type: integer
+          description: Payment amount in minor units of Configured Currency
+        currency:
+          type: string
+          description: Configured Currency
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the payment.successful Domain Event was recorded
+        metadata:
+          type: object
+          description: Payment Metadata supplied at Payment creation
+
+    IncludedRefundRecord:
+      type: object
+      required:
+        - domain_event_id
+        - refund_id
+        - payment_id
+        - merchant_id
+        - amount_minor
+        - currency
+        - occurred_at
+      properties:
+        domain_event_id:
+          type: string
+          format: uuid
+          description: ID of the refund.completed Domain Event
+        refund_id:
+          type: string
+          format: uuid
+          description: Refund ID
+        payment_id:
+          type: string
+          format: uuid
+          description: The Payment ID that was refunded
+        merchant_id:
+          type: string
+          format: uuid
+          description: Owning Merchant Account ID
+        amount_minor:
+          type: integer
+          description: Refund amount in minor units of Configured Currency
+        currency:
+          type: string
+          description: Configured Currency
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the refund.completed Domain Event was recorded
