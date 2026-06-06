@@ -36,6 +36,10 @@ _Avoid_: Transaction status
 Payment Status History is the ordered record of Payment Statuses a Payment has reached during its lifecycle, including status changes caused by completed Refunds.
 _Avoid_: Transaction history, audit history
 
+**Payment Overview**:
+A Payment Overview is a Merchant Dashboard summary of a Merchant Account's Payments by Payment Status and recent Payment activity.
+_Avoid_: Transaction overview, revenue analytics
+
 **Payment Processing Outcome**:
 A Payment Processing Outcome is the System Principal's result for processing a Payment: successful or failed. A failed outcome may include a failure reason; merchant-supplied Payment Metadata does not decide the outcome.
 _Avoid_: Merchant-selected outcome, metadata-driven outcome
@@ -55,6 +59,10 @@ _Avoid_: Partially refunded payment
 **Refund Status**:
 Refund Status expresses where a Refund is in its lifecycle: pending, processing, completed, or failed.
 _Avoid_: Refund state machine (as a replacement for status term)
+
+**Refund Overview**:
+A Refund Overview is a Merchant Dashboard summary of a Merchant Account's Refunds by Refund Status and recent Refund activity.
+_Avoid_: Reversal overview, refund analytics
 
 **Notification Delivery Record**:
 A Notification Delivery Record tracks delivery of one domain event to one destination and its outcome.
@@ -128,6 +136,10 @@ _Avoid_: Customer, seller account
 A Merchant Account is the business owner of Payments and Refunds.
 _Avoid_: Merchant user, customer account
 
+**Merchant Dashboard**:
+A Merchant Dashboard is a Merchant-facing operational workspace for viewing and acting on the Merchant Account's Payments and Refunds.
+_Avoid_: Analytics dashboard, admin dashboard, reconciliation dashboard
+
 **Administrator**:
 An Administrator is an Actor role with platform operations responsibility across merchants.
 _Avoid_: Admin user, superuser
@@ -148,6 +160,7 @@ _Avoid_: System user, service account
 
 - "Transaction" was used interchangeably with "Payment" in planning docs; use **Payment** as the canonical term unless referring to external processor records in future scope.
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
+- "Search transactions" in Merchant Dashboard planning means searching **Payments** by Payment identifier or Merchant Reference; related Refunds are reached from Payment context rather than through a new combined transaction concept.
 - "Transaction history" in planning docs means **Payment Status History** when discussing a Payment's lifecycle statuses.
 - "Completed payment" in planning docs means a **Payment** with **Payment Status** `successful`; Payment does not have a `completed` status.
 - "Payment metadata" in planning docs means **Payment Metadata**, not a separate Payment Request object or mutable lifecycle details. Payment Metadata is part of the create command identified by an **Idempotency Key**.
@@ -158,12 +171,15 @@ _Avoid_: System user, service account
 - MVP uses full refunds only; "partial refund" is future scope and must not be implied by "refunded".
 - MVP refund behavior is one Refund record per successful Payment; retrying after a failed Refund and multiple or partial refunds are future scope.
 - "Refund request" in planning docs means the Merchant action that creates a **Refund**; do not introduce a separate Refund Request domain object.
+- In the Merchant Dashboard, requesting a **Refund** is a Payment-centered action exposed only from an eligible successful Payment context.
 - "Refund requested" in planning docs and legacy code means the **Refund** was created; use **refund.created** for the action and Domain Event name.
 - A **Rejected Refund Attempt** is not a **Refund** with **Refund Status** `failed`; `failed` belongs to refund processing after a Refund exists.
 - "Refund outcome" in refund history planning means **Refund Status**; do not introduce a separate Refund Outcome concept for MVP.
+- "Track payment and refund statuses" in Merchant Dashboard planning means showing **Payment Status** and **Refund Status**, not **Notification Delivery Record** status.
 - Creating a **Refund** is a Merchant action; Administrator refund access is for monitoring and inspection, not initiation.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
+- The **Merchant Dashboard** is only for authenticated Merchants; Administrators use administrator-facing views rather than entering the Merchant workspace.
 - Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.
 - Authentication failures may include unverified identity claims, but those claims do not establish an **Actor**.
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.

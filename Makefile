@@ -1,4 +1,16 @@
-.PHONY: dev-up dev-down migrate seed run-api run-worker test lint fmt
+.PHONY: dev-up dev-down migrate seed run-api run-worker run-web install-web test-web build-web test lint fmt
+
+run-web:
+	cd apps/web && npm run dev
+
+install-web:
+	cd apps/web && npm install
+
+test-web:
+	cd apps/web && npm test -- --run
+
+build-web:
+	cd apps/web && npm run build
 
 dev-up:
 	docker compose up -d

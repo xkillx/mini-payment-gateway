@@ -9,6 +9,7 @@ members = [
     "crates/shared-http",
     "crates/shared-observability",
     "crates/shared-auth",
+    "crates/dashboard",
     "crates/payments",
     "crates/refunds",
     "crates/notifications",

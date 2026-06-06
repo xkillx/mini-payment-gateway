@@ -55,6 +55,7 @@ dependencies = [
  "audit",
  "axum",
  "chrono",
+ "dashboard",
  "jsonwebtoken",
  "notifications",
  "payments",
@@ -366,6 +367,21 @@ dependencies = [
  "darling_core",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "dashboard"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "serde",
+ "serde_json",
+ "shared-auth",
+ "shared-http",
+ "sqlx",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

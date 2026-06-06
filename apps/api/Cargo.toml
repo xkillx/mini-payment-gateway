@@ -24,6 +24,7 @@ reconciliation = { path = "../../crates/reconciliation" }
 audit = { path = "../../crates/audit" }
 reporting = { path = "../../crates/reporting" }
 admin = { path = "../../crates/admin" }
+dashboard = { path = "../../crates/dashboard" }
 
 axum = { workspace = true }
 tokio = { workspace = true }

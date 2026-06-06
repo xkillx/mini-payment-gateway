@@ -7,10 +7,12 @@ Modular monolith with domain-first module boundaries:
 ```
 apps/
   api/       - Axum HTTP server
+  web/       - React Merchant Dashboard (Vite + TypeScript)
   worker/    - Background job worker (payment processing and notification delivery)
   migrate/   - Migration runner + seed
 
 crates/
+  dashboard/            - Merchant Dashboard summary API endpoint
   shared-config/       - Environment config (AppConfig)
   shared-db/           - DB connection pool + seed logic
   shared-http/         - Error envelope, middleware, route helpers
@@ -90,6 +92,7 @@ All `/api/v1` routes require `Authorization: Bearer <jwt>`. The JWT must:
 |---|---|---|
 | `GET /api/v1/payments`, `GET /api/v1/refunds` | Yes | Yes |
 | `POST /api/v1/payments`, `POST /api/v1/refunds` | Yes | No |
+| `GET /api/v1/dashboard/merchant` | Yes | No |
 | `/api/v1/notifications`, `/api/v1/reconciliation` | No | Yes |
 | `/api/v1/audit`, `/api/v1/reporting`, `/api/v1/admin` | No | Yes |
 
