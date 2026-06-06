@@ -11,9 +11,10 @@ import RequestRefundAction from './RequestRefundAction';
 interface PaymentDetailProps {
   paymentId: string;
   onBack: () => void;
+  canRequestRefund?: boolean;
 }
 
-export default function PaymentDetail({ paymentId, onBack }: PaymentDetailProps) {
+export default function PaymentDetail({ paymentId, onBack, canRequestRefund = true }: PaymentDetailProps) {
   const [payment, setPayment] = useState<PaymentDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,14 +86,16 @@ export default function PaymentDetail({ paymentId, onBack }: PaymentDetailProps)
           </span>
         </div>
 
-        <div className="detail-actions">
-          <RequestRefundAction
-            paymentId={payment.id}
-            isEligible={isEligibleForRefund}
-            hasExistingRefund={payment.refunds && payment.refunds.length > 0}
-            onRefundCreated={load}
-          />
-        </div>
+        {canRequestRefund && (
+          <div className="detail-actions">
+            <RequestRefundAction
+              paymentId={payment.id}
+              isEligible={isEligibleForRefund}
+              hasExistingRefund={payment.refunds && payment.refunds.length > 0}
+              onRefundCreated={load}
+            />
+          </div>
+        )}
 
         <div className="detail-grid">
           <span className="detail-label">Payment ID</span>

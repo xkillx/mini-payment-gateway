@@ -9,7 +9,6 @@ Source: [PRD.md](./PRD.md)
 No tickets currently assigned.
 
 ### Backlog
-- [MPG-020](#mpg-020-build-admin-dashboard)
 - [MPG-021](#mpg-021-build-transaction-reporting)
 - [MPG-022](#mpg-022-add-operational-health-view)
 - [MPG-023](#mpg-023-add-mvp-test-coverage)
@@ -40,6 +39,7 @@ No tickets currently assigned.
 - [MPG-017](#mpg-017-run-manual-reconciliation)
 - [MPG-018](#mpg-018-generate-reconciliation-report)
 - [MPG-019](#mpg-019-build-merchant-dashboard)
+- [MPG-020](#mpg-020-build-admin-dashboard)
 
 ---
 

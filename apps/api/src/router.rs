@@ -36,13 +36,21 @@ pub fn build(state: AppState) -> Router {
     let refunds = merchant_scoped_guard(refunds::routes::routes(state.pool.clone()));
     let refunds = role_guard(refunds, merchant_or_admin);
 
-    let dashboard_routes = role_guard(
-        dashboard::routes::merchant_routes(
-            state.pool.clone(),
-            state.config.payment_currency.clone(),
-        ),
-        merchant_only.clone(),
-    );
+    let dashboard_routes = Router::new()
+        .merge(role_guard(
+            dashboard::routes::merchant_routes(
+                state.pool.clone(),
+                state.config.payment_currency.clone(),
+            ),
+            merchant_only.clone(),
+        ))
+        .merge(role_guard(
+            dashboard::routes::admin_routes(
+                state.pool.clone(),
+                state.config.payment_currency.clone(),
+            ),
+            admin_only.clone(),
+        ));
 
     let admin_routes = role_guard(admin::routes::routes(), admin_only.clone());
     let notifications_routes = role_guard(

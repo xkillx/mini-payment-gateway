@@ -6,12 +6,17 @@ import StatusFilter from './StatusFilter';
 
 interface RefundListProps {
   currency: string;
+  mode?: 'merchant' | 'administrator';
 }
 
 const PAGE_SIZE = 20;
 
-export default function RefundList({ currency: _currency }: RefundListProps) {
+export default function RefundList({
+  currency: _currency,
+  mode = 'merchant',
+}: RefundListProps) {
   const [status, setStatus] = useState<RefundStatus | ''>('');
+  const [merchantId, setMerchantId] = useState('');
   const [items, setItems] = useState<RefundListItem[]>([]);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -19,29 +24,43 @@ export default function RefundList({ currency: _currency }: RefundListProps) {
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
-  const load = useCallback(async (newOffset: number, isReset: boolean) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listRefunds({
-        status: status || undefined,
-        limit: PAGE_SIZE,
-        offset: newOffset,
-      });
-      if (isReset) {
-        setItems(res.items);
-      } else {
-        setItems((prev) => [...prev, ...res.items]);
+  const isAdmin = mode === 'administrator';
+
+  const load = useCallback(
+    async (newOffset: number, isReset: boolean) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params: {
+          status?: string;
+          merchantId?: string;
+          limit: number;
+          offset: number;
+        } = {
+          status: status || undefined,
+          limit: PAGE_SIZE,
+          offset: newOffset,
+        };
+        if (isAdmin && merchantId.trim()) {
+          params.merchantId = merchantId.trim();
+        }
+        const res = await listRefunds(params);
+        if (isReset) {
+          setItems(res.items);
+        } else {
+          setItems((prev) => [...prev, ...res.items]);
+        }
+        setHasMore(res.items.length === PAGE_SIZE);
+        setOffset(newOffset);
+        setSearched(true);
+      } catch {
+        setError('Failed to load refunds.');
+      } finally {
+        setLoading(false);
       }
-      setHasMore(res.items.length === PAGE_SIZE);
-      setOffset(newOffset);
-      setSearched(true);
-    } catch {
-      setError('Failed to load refunds.');
-    } finally {
-      setLoading(false);
-    }
-  }, [status]);
+    },
+    [status, merchantId, isAdmin]
+  );
 
   const handleSearch = () => {
     setSearched(false);
@@ -59,10 +78,14 @@ export default function RefundList({ currency: _currency }: RefundListProps) {
 
   const statusClass = (s: RefundStatus) => {
     switch (s) {
-      case 'pending': return 'pending';
-      case 'processing': return 'processing';
-      case 'completed': return 'completed';
-      case 'failed': return 'failed';
+      case 'pending':
+        return 'pending';
+      case 'processing':
+        return 'processing';
+      case 'completed':
+        return 'completed';
+      case 'failed':
+        return 'failed';
     }
   };
 
@@ -86,11 +109,30 @@ export default function RefundList({ currency: _currency }: RefundListProps) {
         </button>
       </div>
 
-      {error && <div className="error-banner" style={{ marginBottom: 16 }}>{error}</div>}
+      {isAdmin && (
+        <div className="search-bar">
+          <input
+            className="search-input"
+            type="text"
+            placeholder="Filter by Merchant Account ID (UUID)"
+            value={merchantId}
+            onChange={(e) => setMerchantId(e.target.value)}
+          />
+          <button className="btn btn-primary" onClick={handleSearch}>
+            Filter
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="error-banner" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
       {searched && !loading && items.length === 0 && (
         <div className="empty-state">
-          <p>No Refunds found. Request a refund from an eligible successful Payment.</p>
+          <p>No Refunds found.</p>
         </div>
       )}
 
@@ -101,6 +143,7 @@ export default function RefundList({ currency: _currency }: RefundListProps) {
               <tr>
                 <th>Refund ID</th>
                 <th>Payment ID</th>
+                {isAdmin && <th>Merchant ID</th>}
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -116,6 +159,11 @@ export default function RefundList({ currency: _currency }: RefundListProps) {
                   <td style={{ fontFamily: 'monospace', fontSize: 13 }}>
                     {r.payment_id.substring(0, 8)}...
                   </td>
+                  {isAdmin && (
+                    <td style={{ fontFamily: 'monospace', fontSize: 13 }}>
+                      {r.merchant_id.substring(0, 8)}...
+                    </td>
+                  )}
                   <td>{formatCurrency(r.amount_minor, r.currency)}</td>
                   <td>
                     <span className={`status-badge ${statusClass(r.status)}`}>

@@ -140,6 +140,14 @@ _Avoid_: Merchant user, customer account
 A Merchant Dashboard is a Merchant-facing operational workspace for viewing and acting on the Merchant Account's Payments and Refunds.
 _Avoid_: Analytics dashboard, admin dashboard, reconciliation dashboard
 
+**Administrator Dashboard**:
+An Administrator Dashboard is an Administrator-facing operational workspace for platform-wide monitoring, Reconciliation Reports, and Audit Records across Merchant Accounts.
+_Avoid_: Admin dashboard, merchant dashboard, analytics dashboard
+
+**System Health Overview**:
+A System Health Overview is the lightweight Administrator Dashboard summary of current operational signals that need attention. It is not a full health or reliability analysis view.
+_Avoid_: Operational Health View, uptime report, SLO dashboard
+
 **Administrator**:
 An Administrator is an Actor role with platform operations responsibility across merchants.
 _Avoid_: Admin user, superuser
@@ -180,6 +188,8 @@ _Avoid_: System user, service account
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.
 - **Merchant** as an Actor role is distinct from the **Merchant Account** that owns Payments, even when a single MVP actor represents a single Merchant Account.
 - The **Merchant Dashboard** is only for authenticated Merchants; Administrators use administrator-facing views rather than entering the Merchant workspace.
+- The **Administrator Dashboard** is a separate Administrator-only workspace from the **Merchant Dashboard**, not a role-expanded Merchant Dashboard.
+- A **System Health Overview** in MPG-020 is intentionally lightweight; the fuller Operational Health View belongs to MPG-022.
 - Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.
 - Authentication failures may include unverified identity claims, but those claims do not establish an **Actor**.
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.

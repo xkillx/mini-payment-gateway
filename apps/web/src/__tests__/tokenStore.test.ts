@@ -37,8 +37,31 @@ describe('tokenStore', () => {
     expect(hasToken()).toBe(false);
   });
 
-  it('uses correct storage key', () => {
+  it('uses new storage key', () => {
     setToken('test-jwt-token');
-    expect(mockLocalStorage.getItem('mpg.merchantDashboard.token')).toBe('test-jwt-token');
+    expect(mockLocalStorage.getItem('mpg.dashboard.token')).toBe('test-jwt-token');
+  });
+
+  it('migrates legacy key on read', () => {
+    mockLocalStorage.setItem('mpg.merchantDashboard.token', 'legacy-token');
+    expect(getToken()).toBe('legacy-token');
+    expect(mockLocalStorage.getItem('mpg.dashboard.token')).toBe('legacy-token');
+    expect(mockLocalStorage.getItem('mpg.merchantDashboard.token')).toBeNull();
+  });
+
+  it('removes legacy key on write', () => {
+    mockLocalStorage.setItem('mpg.merchantDashboard.token', 'old-token');
+    setToken('new-token');
+    expect(mockLocalStorage.getItem('mpg.dashboard.token')).toBe('new-token');
+    expect(mockLocalStorage.getItem('mpg.merchantDashboard.token')).toBeNull();
+  });
+
+  it('clear removes both keys', () => {
+    mockLocalStorage.setItem('mpg.dashboard.token', 'current');
+    mockLocalStorage.setItem('mpg.merchantDashboard.token', 'legacy');
+    clearToken();
+    expect(mockLocalStorage.getItem('mpg.dashboard.token')).toBeNull();
+    expect(mockLocalStorage.getItem('mpg.merchantDashboard.token')).toBeNull();
+    expect(hasToken()).toBe(false);
   });
 });

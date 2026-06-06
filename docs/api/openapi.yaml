@@ -28,6 +28,35 @@ paths:
                     type: string
                     example: 0.1.0
 
+  /api/v1/dashboard/admin:
+    get:
+      operationId: getAdminDashboard
+      summary: Get Administrator Dashboard summary
+      description: |
+        Returns an Administrator Dashboard summary for platform-wide operational
+        visibility. The summary uses a rolling 24-hour window (window_start to
+        window_end) computed at request time for Payment, Refund, Reconciliation,
+        and Audit Record attention counts. Failed Notification Delivery Record
+        counts are current across all records, not limited to the 24-hour window.
+
+        The endpoint is Administrator-only. Merchants receive 403 and missing
+        tokens receive 401.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Administrator Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboardSummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/payments:
     get:
       operationId: listPayments
@@ -767,6 +796,300 @@ components:
         details:
           type: object
           nullable: true
+
+    AdminDashboardSummaryResponse:
+      type: object
+      required:
+        - configured_currency
+        - generated_at
+        - window_start
+        - window_end
+        - api_status
+        - payment_overview
+        - refund_overview
+        - notification_overview
+        - reconciliation_overview
+        - audit_overview
+      properties:
+        configured_currency:
+          type: string
+          description: Configured Currency (e.g. USD)
+        generated_at:
+          type: string
+          format: date-time
+          description: When this summary was generated
+        window_start:
+          type: string
+          format: date-time
+          description: Inclusive start of the 24-hour System Health Overview window
+        window_end:
+          type: string
+          format: date-time
+          description: Exclusive end of the 24-hour System Health Overview window
+        api_status:
+          type: string
+          enum:
+            - reachable
+          description: API status when summary was successfully generated
+        payment_overview:
+          $ref: "#/components/schemas/AdminPaymentOverview"
+        refund_overview:
+          $ref: "#/components/schemas/AdminRefundOverview"
+        notification_overview:
+          $ref: "#/components/schemas/AdminNotificationOverview"
+        reconciliation_overview:
+          $ref: "#/components/schemas/AdminReconciliationOverview"
+        audit_overview:
+          $ref: "#/components/schemas/AdminAuditOverview"
+
+    AdminPaymentOverview:
+      type: object
+      required:
+        - status_counts
+        - recent_failed_payments
+      properties:
+        status_counts:
+          $ref: "#/components/schemas/PaymentStatusCounts"
+        recent_failed_payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentListItemResponse"
+          description: Recent failed Payments within the 24-hour window (limit 5)
+
+    AdminRefundOverview:
+      type: object
+      required:
+        - status_counts
+        - recent_failed_refunds
+      properties:
+        status_counts:
+          $ref: "#/components/schemas/RefundStatusCounts"
+        recent_failed_refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundReadResponse"
+          description: Recent failed Refunds within the 24-hour window (limit 5)
+
+    PaymentStatusCounts:
+      type: object
+      required:
+        - pending
+        - processing
+        - successful
+        - failed
+        - refunded
+      properties:
+        pending:
+          type: integer
+        processing:
+          type: integer
+        successful:
+          type: integer
+        failed:
+          type: integer
+        refunded:
+          type: integer
+
+    RefundStatusCounts:
+      type: object
+      required:
+        - pending
+        - processing
+        - completed
+        - failed
+      properties:
+        pending:
+          type: integer
+        processing:
+          type: integer
+        completed:
+          type: integer
+        failed:
+          type: integer
+
+    AdminNotificationOverview:
+      type: object
+      required:
+        - status_counts
+        - recent_failed_notifications
+      properties:
+        status_counts:
+          $ref: "#/components/schemas/NotificationStatusCounts"
+        recent_failed_notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminNotificationListItem"
+          description: Current failed Notification Delivery Records (limit 5)
+
+    NotificationStatusCounts:
+      type: object
+      required:
+        - pending
+        - processing
+        - delivered
+        - failed
+      properties:
+        pending:
+          type: integer
+        processing:
+          type: integer
+        delivered:
+          type: integer
+        failed:
+          type: integer
+
+    AdminNotificationListItem:
+      type: object
+      required:
+        - id
+        - domain_event_id
+        - event_type
+        - resource_type
+        - resource_id
+        - payment_id
+        - destination_url
+        - status
+        - attempt_count
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        domain_event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        destination_url:
+          type: string
+        status:
+          type: string
+        attempt_count:
+          type: integer
+        last_error:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminReconciliationOverview:
+      type: object
+      required:
+        - status_counts
+        - recent_attention_reconciliations
+      properties:
+        status_counts:
+          $ref: "#/components/schemas/ReconciliationStatusCounts"
+        recent_attention_reconciliations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminReconciliationListItem"
+          description: Recent mismatched/error Reconciliations (limit 5)
+
+    ReconciliationStatusCounts:
+      type: object
+      required:
+        - matched
+        - mismatched
+        - error
+      properties:
+        matched:
+          type: integer
+        mismatched:
+          type: integer
+        error:
+          type: integer
+
+    AdminReconciliationListItem:
+      type: object
+      required:
+        - id
+        - status
+        - expected_total_minor
+        - actual_total_minor
+        - discrepancy_minor
+        - currency
+        - window_start
+        - window_end
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        expected_total_minor:
+          type: integer
+        actual_total_minor:
+          type: integer
+        discrepancy_minor:
+          type: integer
+        currency:
+          type: string
+        window_start:
+          type: string
+          format: date-time
+        window_end:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    AdminAuditOverview:
+      type: object
+      required:
+        - recent_attention_audit_records
+      properties:
+        recent_attention_audit_records:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAuditListItem"
+
+    AdminAuditListItem:
+      type: object
+      required:
+        - id
+        - actor_type
+        - action
+        - resource_type
+        - resource_id
+        - occurred_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        actor_type:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        details:
+          type: object
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
 
     CreatePaymentRequest:
       type: object
