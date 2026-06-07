@@ -5,6 +5,8 @@ use uuid::Uuid;
 use crate::models::{
     AdminAuditRow, AdminFailedPaymentRow, AdminFailedRefundRow, AdminNotificationRow,
     AdminReconciliationRow, DashboardPaymentRow, DashboardRefundRow, NotificationStatusRow,
+    OperationalNotificationFailureRow, OperationalPaymentFailureRow,
+    OperationalReconciliationAttentionRow, OperationalRefundFailureRow, PaymentOutcomeCountRow,
     PaymentStatusCount, ReconciliationStatusRow, RefundStatusRow,
 };
 
@@ -156,6 +158,98 @@ pub async fn get_admin_recent_attention_audit_records(
         "SELECT id, actor_id, actor_type::text AS actor_type, action, resource_type, resource_id, details, occurred_at, created_at FROM audit_records WHERE occurred_at >= $1 AND action IN ('auth.authentication_failed', 'auth.authorization_failed', 'payment.failed', 'refund.rejected') ORDER BY occurred_at DESC, created_at DESC, id DESC LIMIT 5",
     )
     .bind(window_start)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_payment_outcome_counts_window(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+) -> Result<Vec<PaymentOutcomeCountRow>, sqlx::Error> {
+    sqlx::query_as::<_, PaymentOutcomeCountRow>(
+        "SELECT event_type, COUNT(*) AS count FROM domain_events WHERE aggregate_type = 'payment' AND event_type IN ('payment.successful', 'payment.failed') AND created_at >= $1 GROUP BY event_type",
+    )
+    .bind(window_start)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_notification_status_counts_window(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+) -> Result<Vec<NotificationStatusRow>, sqlx::Error> {
+    sqlx::query_as::<_, NotificationStatusRow>(
+        "SELECT status::text AS status, COUNT(*) AS count FROM notification_delivery_records WHERE updated_at >= $1 GROUP BY status",
+    )
+    .bind(window_start)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_recent_failed_notifications_window(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+) -> Result<Vec<AdminNotificationRow>, sqlx::Error> {
+    sqlx::query_as::<_, AdminNotificationRow>(
+        "SELECT ndr.id, ndr.domain_event_id, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id, de.aggregate_id AS payment_id, ndr.destination_url, ndr.status::text AS status, ndr.attempt_count, ndr.last_error, ndr.updated_at FROM notification_delivery_records ndr JOIN domain_events de ON ndr.domain_event_id = de.id WHERE ndr.status = 'failed' AND ndr.updated_at >= $1 ORDER BY ndr.updated_at DESC, ndr.id DESC LIMIT 5",
+    )
+    .bind(window_start)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_operational_payment_failures(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<OperationalPaymentFailureRow>, sqlx::Error> {
+    sqlx::query_as::<_, OperationalPaymentFailureRow>(
+        "SELECT p.id, p.merchant_id, p.amount_minor, p.currency, p.status::text AS status, p.failure_reason, de.created_at AS occurred_at, de.event_type FROM payments p JOIN domain_events de ON de.aggregate_type = 'payment' AND de.aggregate_id = p.id WHERE de.event_type = 'payment.failed' AND de.created_at >= $1 ORDER BY de.created_at DESC, p.id DESC LIMIT $2",
+    )
+    .bind(window_start)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_operational_refund_failures(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<OperationalRefundFailureRow>, sqlx::Error> {
+    sqlx::query_as::<_, OperationalRefundFailureRow>(
+        "SELECT id, payment_id, merchant_id, amount_minor, currency, status::text AS status, updated_at AS occurred_at FROM refunds WHERE status = 'failed' AND updated_at >= $1 ORDER BY updated_at DESC, id DESC LIMIT $2",
+    )
+    .bind(window_start)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_operational_notification_failures(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<OperationalNotificationFailureRow>, sqlx::Error> {
+    sqlx::query_as::<_, OperationalNotificationFailureRow>(
+        "SELECT ndr.id, de.aggregate_id AS payment_id, de.event_type, de.aggregate_type AS resource_type, de.aggregate_id AS resource_id, ndr.status::text AS status, ndr.last_error, ndr.updated_at AS occurred_at FROM notification_delivery_records ndr JOIN domain_events de ON ndr.domain_event_id = de.id WHERE ndr.status = 'failed' AND ndr.updated_at >= $1 ORDER BY ndr.updated_at DESC, ndr.id DESC LIMIT $2",
+    )
+    .bind(window_start)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_admin_operational_reconciliation_attention(
+    pool: &PgPool,
+    window_start: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<OperationalReconciliationAttentionRow>, sqlx::Error> {
+    sqlx::query_as::<_, OperationalReconciliationAttentionRow>(
+        "SELECT id, status::text AS status, expected_total_minor, actual_total_minor, discrepancy_minor, currency, created_at AS occurred_at FROM reconciliations WHERE status IN ('mismatched', 'error') AND created_at >= $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+    )
+    .bind(window_start)
+    .bind(limit)
     .fetch_all(pool)
     .await
 }

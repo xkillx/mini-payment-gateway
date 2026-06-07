@@ -22,6 +22,40 @@ pub struct AdminDashboardSummaryResponse {
     pub notification_overview: AdminNotificationOverview,
     pub reconciliation_overview: AdminReconciliationOverview,
     pub audit_overview: AdminAuditOverview,
+    pub operational_health: AdminOperationalHealth,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminOperationalHealth {
+    pub payment_processing_success_rate: OperationalHealthRate,
+    pub notification_delivery_success_rate: OperationalHealthRate,
+    pub reconciliation_completion_rate: OperationalHealthRate,
+    pub recent_failed_operations: Vec<OperationalHealthFailedOperation>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OperationalHealthRate {
+    pub numerator_count: i64,
+    pub denominator_count: i64,
+    pub in_flight_count: i64,
+    pub rate_percent: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OperationalHealthFailedOperation {
+    pub kind: String,
+    pub id: Uuid,
+    pub occurred_at: DateTime<Utc>,
+    pub status: String,
+    pub merchant_id: Option<Uuid>,
+    pub payment_id: Option<Uuid>,
+    pub amount_minor: Option<i64>,
+    pub currency: Option<String>,
+    pub reason: Option<String>,
+    pub event_type: Option<String>,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<Uuid>,
+    pub discrepancy_minor: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -424,4 +458,56 @@ impl From<AdminFailedRefundRow> for DashboardRefundListItem {
             updated_at: row.updated_at,
         }
     }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct PaymentOutcomeCountRow {
+    pub event_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct OperationalPaymentFailureRow {
+    pub id: Uuid,
+    pub merchant_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: String,
+    pub failure_reason: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+    pub event_type: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct OperationalRefundFailureRow {
+    pub id: Uuid,
+    pub payment_id: Uuid,
+    pub merchant_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: String,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct OperationalNotificationFailureRow {
+    pub id: Uuid,
+    pub payment_id: Uuid,
+    pub event_type: String,
+    pub resource_type: String,
+    pub resource_id: Uuid,
+    pub status: String,
+    pub last_error: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct OperationalReconciliationAttentionRow {
+    pub id: Uuid,
+    pub status: String,
+    pub expected_total_minor: i64,
+    pub actual_total_minor: i64,
+    pub discrepancy_minor: i64,
+    pub currency: String,
+    pub occurred_at: DateTime<Utc>,
 }

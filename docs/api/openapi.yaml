@@ -36,8 +36,7 @@ paths:
         Returns an Administrator Dashboard summary for platform-wide operational
         visibility. The summary uses a rolling 24-hour window (window_start to
         window_end) computed at request time for Payment, Refund, Reconciliation,
-        and Audit Record attention counts. Failed Notification Delivery Record
-        counts are current across all records, not limited to the 24-hour window.
+        Audit Record attention counts, and Notification Delivery Record counts.
 
         The endpoint is Administrator-only. Merchants receive 403 and missing
         tokens receive 401.
@@ -835,6 +834,7 @@ components:
         - notification_overview
         - reconciliation_overview
         - audit_overview
+        - operational_health
       properties:
         configured_currency:
           type: string
@@ -846,11 +846,11 @@ components:
         window_start:
           type: string
           format: date-time
-          description: Inclusive start of the 24-hour System Health Overview window
+          description: Inclusive start of the rolling 24-hour admin dashboard and Operational Health View window
         window_end:
           type: string
           format: date-time
-          description: Exclusive end of the 24-hour System Health Overview window
+          description: Exclusive end of the rolling 24-hour admin dashboard and Operational Health View window
         api_status:
           type: string
           enum:
@@ -866,6 +866,8 @@ components:
           $ref: "#/components/schemas/AdminReconciliationOverview"
         audit_overview:
           $ref: "#/components/schemas/AdminAuditOverview"
+        operational_health:
+          $ref: "#/components/schemas/AdminOperationalHealth"
 
     AdminPaymentOverview:
       type: object
@@ -944,7 +946,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminNotificationListItem"
-          description: Current failed Notification Delivery Records (limit 5)
+          description: Failed Notification Delivery Records within the 24-hour window (limit 5)
 
     NotificationStatusCounts:
       type: object
@@ -1115,6 +1117,115 @@ components:
         created_at:
           type: string
           format: date-time
+
+    AdminOperationalHealth:
+      type: object
+      required:
+        - payment_processing_success_rate
+        - notification_delivery_success_rate
+        - reconciliation_completion_rate
+        - recent_failed_operations
+      properties:
+        payment_processing_success_rate:
+          $ref: "#/components/schemas/OperationalHealthRate"
+        notification_delivery_success_rate:
+          $ref: "#/components/schemas/OperationalHealthRate"
+        reconciliation_completion_rate:
+          $ref: "#/components/schemas/OperationalHealthRate"
+        recent_failed_operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationalHealthFailedOperation"
+          description: Unified newest-first feed of failed operations (limit 10)
+
+    OperationalHealthRate:
+      type: object
+      required:
+        - numerator_count
+        - denominator_count
+        - in_flight_count
+      properties:
+        numerator_count:
+          type: integer
+          description: Count of terminal successes (e.g. delivered notifications)
+        denominator_count:
+          type: integer
+          description: Count of terminal outcomes (successes + failures)
+        in_flight_count:
+          type: integer
+          description: Count of pending or processing records that are in-flight context
+        rate_percent:
+          type: number
+          format: double
+          nullable: true
+          description: Success rate as a percentage, or null when denominator is zero (N/A)
+
+    OperationalHealthFailedOperation:
+      type: object
+      required:
+        - kind
+        - id
+        - occurred_at
+        - status
+      properties:
+        kind:
+          type: string
+          enum:
+            - payment
+            - refund
+            - notification_delivery_record
+            - reconciliation
+          description: Type of failed operation
+        id:
+          type: string
+          format: uuid
+          description: Operation resource ID
+        occurred_at:
+          type: string
+          format: date-time
+          description: When the failure occurred
+        status:
+          type: string
+          description: Current status of the failed operation
+        merchant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Owning Merchant Account ID (when available)
+        payment_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Related Payment ID (when available)
+        amount_minor:
+          type: integer
+          nullable: true
+          description: Associated amount in minor units (when available)
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency code (when available)
+        reason:
+          type: string
+          nullable: true
+          description: Best available failure reason or error context
+        event_type:
+          type: string
+          nullable: true
+          description: Domain Event type (when available)
+        resource_type:
+          type: string
+          nullable: true
+          description: Aggregate resource type for navigation
+        resource_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Aggregate resource ID for navigation
+        discrepancy_minor:
+          type: integer
+          nullable: true
+          description: Reconciliation discrepancy in minor units (reconciliation only)
 
     CreatePaymentRequest:
       type: object

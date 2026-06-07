@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   listNotifications,
   retryNotification,
@@ -14,7 +14,13 @@ type NotificationStatusFilter = NotificationStatus | '';
 
 const PAGE_SIZE = 20;
 
-export default function NotificationMonitoring() {
+interface NotificationMonitoringProps {
+  initialNotificationId?: string;
+}
+
+export default function NotificationMonitoring({
+  initialNotificationId,
+}: NotificationMonitoringProps = {}) {
   const [status, setStatus] = useState<NotificationStatusFilter>('');
   const [items, setItems] = useState<NotificationDeliveryRecordDetail[]>([]);
   const [offset, setOffset] = useState(0);
@@ -50,6 +56,12 @@ export default function NotificationMonitoring() {
     },
     [status]
   );
+
+  useEffect(() => {
+    if (initialNotificationId) {
+      setSelectedId(initialNotificationId);
+    }
+  }, [initialNotificationId]);
 
   const handleSearch = () => {
     setSearched(false);

@@ -94,8 +94,7 @@ async fn send_request(
     let bytes = axum::body::to_bytes(response.into_body(), 10_000_000)
         .await
         .unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, body)
 }
 
@@ -348,8 +347,14 @@ async fn admin_gets_payment_report_with_all_metrics() {
     .await;
 
     let uri = format!("/api/v1/reporting/payment-summary?from={from}&to={to}");
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, &uri, &admin_token(), None)
-        .await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &uri,
+        &admin_token(),
+        None,
+    )
+    .await;
 
     assert_eq!(status, 200);
     assert_eq!(body["configured_currency"], "USD");
@@ -453,8 +458,8 @@ async fn empty_period_returns_zeros() {
     let mut app = build_app(pool.clone()).await;
 
     let uri = "/api/v1/reporting/payment-summary?from=2040-06-01T00:00:00Z&to=2040-06-04T00:00:00Z";
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None)
-        .await;
+    let (status, body) =
+        send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None).await;
 
     assert_eq!(status, 200);
     assert_eq!(body["payment_totals"]["created_count"], 0);
@@ -479,8 +484,8 @@ async fn from_equal_to_returns_422() {
     let mut app = build_app(pool.clone()).await;
 
     let uri = "/api/v1/reporting/payment-summary?from=2040-06-01T00:00:00Z&to=2040-06-01T00:00:00Z";
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None)
-        .await;
+    let (status, body) =
+        send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None).await;
 
     assert_eq!(status, 422);
     assert_eq!(body["code"], "VALIDATION_ERROR");
@@ -492,8 +497,8 @@ async fn from_after_to_returns_422() {
     let mut app = build_app(pool.clone()).await;
 
     let uri = "/api/v1/reporting/payment-summary?from=2040-06-02T00:00:00Z&to=2040-06-01T00:00:00Z";
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None)
-        .await;
+    let (status, body) =
+        send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None).await;
 
     assert_eq!(status, 422);
     assert_eq!(body["code"], "VALIDATION_ERROR");
@@ -505,8 +510,8 @@ async fn period_over_366_days_returns_422() {
     let mut app = build_app(pool.clone()).await;
 
     let uri = "/api/v1/reporting/payment-summary?from=2040-01-01T00:00:00Z&to=2041-01-02T00:00:00Z";
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None)
-        .await;
+    let (status, body) =
+        send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None).await;
 
     assert_eq!(status, 422);
     assert_eq!(body["code"], "VALIDATION_ERROR");
@@ -518,8 +523,8 @@ async fn malformed_timestamp_returns_422() {
     let mut app = build_app(pool.clone()).await;
 
     let uri = "/api/v1/reporting/payment-summary?from=not-a-date&to=2040-06-01T00:00:00Z";
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None)
-        .await;
+    let (status, body) =
+        send_request(&mut app, axum::http::Method::GET, uri, &admin_token(), None).await;
 
     assert_eq!(status, 422);
     assert_eq!(body["code"], "VALIDATION_ERROR");
@@ -557,8 +562,14 @@ async fn refund_without_event_uses_updated_at_fallback() {
     .await;
 
     let uri = format!("/api/v1/reporting/payment-summary?from={from}&to={to}");
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, &uri, &admin_token(), None)
-        .await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &uri,
+        &admin_token(),
+        None,
+    )
+    .await;
 
     assert_eq!(status, 200);
     assert_eq!(body["refund_activity"]["completed_count"], 1);
@@ -598,8 +609,14 @@ async fn refund_outside_period_not_counted() {
     .await;
 
     let uri = format!("/api/v1/reporting/payment-summary?from={from}&to={to}");
-    let (status, body) = send_request(&mut app, axum::http::Method::GET, &uri, &admin_token(), None)
-        .await;
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        &uri,
+        &admin_token(),
+        None,
+    )
+    .await;
 
     assert_eq!(status, 200);
     assert_eq!(body["refund_activity"]["completed_count"], 0);

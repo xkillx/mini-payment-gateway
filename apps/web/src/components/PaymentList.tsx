@@ -12,6 +12,7 @@ interface PaymentListProps {
   showMerchantFilter?: boolean;
   searchSeed?: string;
   onClearSearchSeed?: () => void;
+  initialPaymentId?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -22,6 +23,7 @@ export default function PaymentList({
   showMerchantFilter = false,
   searchSeed,
   onClearSearchSeed,
+  initialPaymentId,
 }: PaymentListProps) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<PaymentStatus | ''>('');
@@ -90,6 +92,12 @@ export default function PaymentList({
       load(0, true);
     }
   }, [search, searched, status, load, searchSeed]);
+
+  useEffect(() => {
+    if (initialPaymentId) {
+      setSelectedId(initialPaymentId);
+    }
+  }, [initialPaymentId]);
 
   const handleSearch = () => {
     setSearched(false);

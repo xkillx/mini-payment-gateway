@@ -77,39 +77,28 @@ pub async fn payment_summary(
     )
     .await?;
 
-    let failed_refund = repository::fetch_failed_refund_count(
-        pool,
-        configured_currency,
+    let failed_refund =
+        repository::fetch_failed_refund_count(pool, configured_currency, period.start, period.end)
+            .await?;
+
+    let created_trend =
+        repository::fetch_created_trend(pool, configured_currency, period.start, period.end)
+            .await?;
+
+    let successful_trend =
+        repository::fetch_successful_trend(pool, configured_currency, period.start, period.end)
+            .await?;
+
+    let failed_trend =
+        repository::fetch_failed_trend(pool, configured_currency, period.start, period.end).await?;
+
+    let trend = build_trend_buckets(
         period.start,
         period.end,
-    )
-    .await?;
-
-    let created_trend = repository::fetch_created_trend(
-        pool,
-        configured_currency,
-        period.start,
-        period.end,
-    )
-    .await?;
-
-    let successful_trend = repository::fetch_successful_trend(
-        pool,
-        configured_currency,
-        period.start,
-        period.end,
-    )
-    .await?;
-
-    let failed_trend = repository::fetch_failed_trend(
-        pool,
-        configured_currency,
-        period.start,
-        period.end,
-    )
-    .await?;
-
-    let trend = build_trend_buckets(period.start, period.end, created_trend, successful_trend, failed_trend);
+        created_trend,
+        successful_trend,
+        failed_trend,
+    );
 
     Ok(PaymentSummaryReport {
         configured_currency: configured_currency.to_string(),
@@ -171,9 +160,7 @@ fn build_trend_buckets(
             successful_amount_minor: successful_amount,
         });
 
-        current = current
-            .succ_opt()
-            .unwrap_or(current);
+        current = current.succ_opt().unwrap_or(current);
     }
 
     buckets
@@ -184,7 +171,9 @@ mod tests {
     use super::*;
 
     fn dt(s: &str) -> DateTime<Utc> {
-        chrono::DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+        chrono::DateTime::parse_from_rfc3339(s)
+            .unwrap()
+            .with_timezone(&Utc)
     }
 
     #[test]
@@ -217,7 +206,10 @@ mod tests {
     fn resolve_period_rejects_start_equal_to_end() {
         let now = dt("2026-06-07T12:00:00Z");
         let result = resolve_period(Some(now), Some(now), now);
-        assert_eq!(result.unwrap_err(), PaymentReportingPeriodError::InvalidRange);
+        assert_eq!(
+            result.unwrap_err(),
+            PaymentReportingPeriodError::InvalidRange
+        );
     }
 
     #[test]
@@ -226,7 +218,10 @@ mod tests {
         let from = dt("2026-06-08T00:00:00Z");
         let to = dt("2026-06-07T00:00:00Z");
         let result = resolve_period(Some(from), Some(to), now);
-        assert_eq!(result.unwrap_err(), PaymentReportingPeriodError::InvalidRange);
+        assert_eq!(
+            result.unwrap_err(),
+            PaymentReportingPeriodError::InvalidRange
+        );
     }
 
     #[test]
@@ -235,7 +230,10 @@ mod tests {
         let from = dt("2025-06-01T00:00:00Z");
         let to = dt("2026-06-07T00:00:00Z");
         let result = resolve_period(Some(from), Some(to), now);
-        assert_eq!(result.unwrap_err(), PaymentReportingPeriodError::PeriodTooLong);
+        assert_eq!(
+            result.unwrap_err(),
+            PaymentReportingPeriodError::PeriodTooLong
+        );
     }
 
     #[test]

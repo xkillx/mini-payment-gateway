@@ -139,6 +139,27 @@ async fn admin_dashboard_returns_summary_with_all_sections() {
     assert!(body["reconciliation_overview"]["recent_attention_reconciliations"].is_array());
 
     assert!(body["audit_overview"]["recent_attention_audit_records"].is_array());
+
+    assert!(body["operational_health"]["recent_failed_operations"].is_array());
+    assert!(
+        body["operational_health"]["payment_processing_success_rate"]["numerator_count"]
+            .is_number()
+    );
+    assert!(
+        body["operational_health"]["payment_processing_success_rate"]["denominator_count"]
+            .is_number()
+    );
+    assert!(
+        body["operational_health"]["payment_processing_success_rate"]["in_flight_count"]
+            .is_number()
+    );
+    assert!(
+        body["operational_health"]["notification_delivery_success_rate"]["numerator_count"]
+            .is_number()
+    );
+    assert!(
+        body["operational_health"]["reconciliation_completion_rate"]["numerator_count"].is_number()
+    );
 }
 
 #[tokio::test]
@@ -301,6 +322,87 @@ async fn admin_dashboard_recent_audit_records_only_include_attention_actions() {
         assert!(
             valid_actions.contains(&action),
             "Unexpected audit action: {action}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn admin_dashboard_zero_terminals_yields_null_rate_percent() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/dashboard/admin",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, 200);
+
+    let reconciliation_rate = &body["operational_health"]["reconciliation_completion_rate"];
+    if reconciliation_rate["denominator_count"].as_i64().unwrap() == 0 {
+        assert!(reconciliation_rate["rate_percent"].is_null());
+    } else {
+        assert!(
+            reconciliation_rate["rate_percent"].is_f64()
+                || reconciliation_rate["rate_percent"].is_null()
+        );
+    }
+}
+
+#[tokio::test]
+async fn admin_dashboard_in_flight_does_not_enter_denominator() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/dashboard/admin",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, 200);
+
+    let payment_rate = &body["operational_health"]["payment_processing_success_rate"];
+    let denominator = payment_rate["denominator_count"].as_i64().unwrap();
+    let in_flight = payment_rate["in_flight_count"].as_i64().unwrap();
+
+    assert!(denominator >= 0);
+    assert!(in_flight >= 0);
+    let _ = payment_rate["numerator_count"].as_i64().unwrap();
+}
+
+#[tokio::test]
+async fn admin_dashboard_failed_operations_sorted_newest_first() {
+    let pool = setup_db().await;
+    let mut app = build_app(pool.clone()).await;
+
+    let (status, body) = send_request(
+        &mut app,
+        axum::http::Method::GET,
+        "/api/v1/dashboard/admin",
+        &admin_token(),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, 200);
+
+    let failed_ops = body["operational_health"]["recent_failed_operations"]
+        .as_array()
+        .unwrap();
+    for i in 1..failed_ops.len() {
+        let prev_time = failed_ops[i - 1]["occurred_at"].as_str().unwrap();
+        let curr_time = failed_ops[i]["occurred_at"].as_str().unwrap();
+        assert!(
+            prev_time >= curr_time,
+            "Failed ops must be sorted newest-first: {prev_time} < {curr_time}"
         );
     }
 }

@@ -28,6 +28,27 @@ const summary: AdminDashboardSummary = {
   audit_overview: {
     recent_attention_audit_records: [],
   },
+  operational_health: {
+    payment_processing_success_rate: {
+      numerator_count: 5,
+      denominator_count: 6,
+      in_flight_count: 1,
+      rate_percent: 83.3,
+    },
+    notification_delivery_success_rate: {
+      numerator_count: 10,
+      denominator_count: 11,
+      in_flight_count: 0,
+      rate_percent: 90.9,
+    },
+    reconciliation_completion_rate: {
+      numerator_count: 3,
+      denominator_count: 3,
+      in_flight_count: 0,
+      rate_percent: 100.0,
+    },
+    recent_failed_operations: [],
+  },
 };
 
 describe('AdminShell', () => {
@@ -63,6 +84,21 @@ describe('AdminShell', () => {
 
     screen.getByText('Payment Reporting').click();
     const elements = screen.getAllByText('Payment Reporting');
+    expect(elements.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders Operational Health nav item', () => {
+    render(<AdminShell summary={summary} onRefresh={() => {}} onLogout={() => {}} />);
+
+    const elements = screen.getAllByText('Operational Health');
+    expect(elements.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows Operational Health heading when nav item is clicked', () => {
+    render(<AdminShell summary={summary} onRefresh={() => {}} onLogout={() => {}} />);
+
+    screen.getAllByText('Operational Health')[0].click();
+    const elements = screen.getAllByText('Operational Health');
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -7,12 +7,14 @@ import {
   Scale,
   FileText,
   BarChart3,
+  HeartPulse,
   RefreshCw,
   LogOut,
   Menu,
 } from 'lucide-react';
-import type { AdminDashboardSummary } from '../../api/types';
+import type { AdminDashboardSummary, OperationalHealthFailedOperation } from '../../api/types';
 import AdminOverview from './AdminOverview';
+import OperationalHealthView from './OperationalHealthView';
 import PaymentList from '../PaymentList';
 import RefundList from '../RefundList';
 import NotificationMonitoring from './NotificationMonitoring';
@@ -22,6 +24,7 @@ import PaymentReporting from './PaymentReporting';
 
 type View =
   | 'overview'
+  | 'operational_health'
   | 'payments'
   | 'refunds'
   | 'notifications'
@@ -38,9 +41,35 @@ interface AdminShellProps {
 export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellProps) {
   const [view, setView] = useState<View>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [initialPaymentId, setInitialPaymentId] = useState<string | undefined>(undefined);
+  const [initialRefundId, setInitialRefundId] = useState<string | undefined>(undefined);
+  const [initialNotificationId, setInitialNotificationId] = useState<string | undefined>(undefined);
+  const [initialReconciliationId, setInitialReconciliationId] = useState<string | undefined>(undefined);
+
+  const handleOpenOperation = (op: OperationalHealthFailedOperation) => {
+    switch (op.kind) {
+      case 'payment':
+        setInitialPaymentId(op.id);
+        setView('payments');
+        break;
+      case 'refund':
+        setInitialRefundId(op.id);
+        setView('refunds');
+        break;
+      case 'notification_delivery_record':
+        setInitialNotificationId(op.id);
+        setView('notifications');
+        break;
+      case 'reconciliation':
+        setInitialReconciliationId(op.id);
+        setView('reconciliation');
+        break;
+    }
+  };
 
   const navItems: { view: View; label: string; icon: React.ReactNode }[] = [
     { view: 'overview', label: 'System Health', icon: <Activity size={20} /> },
+    { view: 'operational_health', label: 'Operational Health', icon: <HeartPulse size={20} /> },
     { view: 'payments', label: 'Payments', icon: <CreditCard size={20} /> },
     { view: 'refunds', label: 'Refunds', icon: <Undo2 size={20} /> },
     { view: 'notifications', label: 'Notifications', icon: <Bell size={20} /> },
@@ -52,6 +81,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
   const viewLabel = (v: View) => {
     switch (v) {
       case 'overview': return 'System Health Overview';
+      case 'operational_health': return 'Operational Health';
       case 'payments': return 'Payments';
       case 'refunds': return 'Refunds';
       case 'notifications': return 'Notifications';
@@ -114,21 +144,43 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
 
         <div className="content">
           {view === 'overview' && <AdminOverview summary={summary} onRefresh={onRefresh} />}
+          {view === 'operational_health' && (
+            <OperationalHealthView
+              operationalHealth={summary.operational_health}
+              windowStart={summary.window_start}
+              windowEnd={summary.window_end}
+              onOpenOperation={handleOpenOperation}
+            />
+          )}
           {view === 'payments' && (
-            <PaymentList currency={summary.configured_currency} mode="administrator" />
+            <PaymentList
+              currency={summary.configured_currency}
+              mode="administrator"
+              searchSeed={initialPaymentId}
+              onClearSearchSeed={() => setInitialPaymentId(undefined)}
+              initialPaymentId={initialPaymentId}
+            />
           )}
           {view === 'refunds' && (
-            <RefundList currency={summary.configured_currency} mode="administrator" />
+            <RefundList
+              currency={summary.configured_currency}
+              mode="administrator"
+              initialRefundId={initialRefundId}
+            />
           )}
-          {view === 'notifications' && <NotificationMonitoring />}
-          {view === 'reconciliation' && <ReconciliationReports />}
+          {view === 'notifications' && (
+            <NotificationMonitoring initialNotificationId={initialNotificationId} />
+          )}
+          {view === 'reconciliation' && (
+            <ReconciliationReports initialReconciliationId={initialReconciliationId} />
+          )}
           {view === 'reporting' && <PaymentReporting />}
           {view === 'audit' && <AuditRecords />}
         </div>
       </div>
 
       <nav className="mobile-nav">
-        {navItems.slice(0, 4).map((item) => (
+        {navItems.slice(0, 5).map((item) => (
           <button
             key={item.view}
             className={view === item.view ? 'active' : ''}

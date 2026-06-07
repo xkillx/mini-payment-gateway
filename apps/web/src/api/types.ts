@@ -26,6 +26,7 @@ export interface AdminDashboardSummary {
   notification_overview: AdminNotificationOverview;
   reconciliation_overview: AdminReconciliationOverview;
   audit_overview: AdminAuditOverview;
+  operational_health: AdminOperationalHealth;
 }
 
 export interface AdminPaymentOverview {
@@ -439,4 +440,34 @@ export interface ApiError {
   message: string;
   request_id: string;
   details?: Record<string, unknown>;
+}
+
+export interface AdminOperationalHealth {
+  payment_processing_success_rate: OperationalHealthRate;
+  notification_delivery_success_rate: OperationalHealthRate;
+  reconciliation_completion_rate: OperationalHealthRate;
+  recent_failed_operations: OperationalHealthFailedOperation[];
+}
+
+export interface OperationalHealthRate {
+  numerator_count: number;
+  denominator_count: number;
+  in_flight_count: number;
+  rate_percent: number | null;
+}
+
+export interface OperationalHealthFailedOperation {
+  kind: 'payment' | 'refund' | 'notification_delivery_record' | 'reconciliation';
+  id: string;
+  occurred_at: string;
+  status: string;
+  merchant_id: string | null;
+  payment_id: string | null;
+  amount_minor: number | null;
+  currency: string | null;
+  reason: string | null;
+  event_type: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  discrepancy_minor: number | null;
 }

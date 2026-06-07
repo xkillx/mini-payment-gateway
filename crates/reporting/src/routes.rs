@@ -38,23 +38,31 @@ async fn payment_summary(
 ) -> Result<Json<crate::models::PaymentSummaryReport>, AppError> {
     let query = query.map_err(|_| {
         let mut errors = ValidationErrors::new();
-        errors.add("query", validator::ValidationError::new("invalid_query_parameters"));
+        errors.add(
+            "query",
+            validator::ValidationError::new("invalid_query_parameters"),
+        );
         AppError::Validation(errors)
     })?;
 
-    let period = service::resolve_period(query.from, query.to, Utc::now())
-        .map_err(|e| {
-            let mut errors = ValidationErrors::new();
-            match e {
-                PaymentReportingPeriodError::InvalidRange => {
-                    errors.add("to", validator::ValidationError::new("to_must_be_after_from"));
-                }
-                PaymentReportingPeriodError::PeriodTooLong => {
-                    errors.add("period", validator::ValidationError::new("period_must_not_exceed_366_days"));
-                }
+    let period = service::resolve_period(query.from, query.to, Utc::now()).map_err(|e| {
+        let mut errors = ValidationErrors::new();
+        match e {
+            PaymentReportingPeriodError::InvalidRange => {
+                errors.add(
+                    "to",
+                    validator::ValidationError::new("to_must_be_after_from"),
+                );
             }
-            AppError::Validation(errors)
-        })?;
+            PaymentReportingPeriodError::PeriodTooLong => {
+                errors.add(
+                    "period",
+                    validator::ValidationError::new("period_must_not_exceed_366_days"),
+                );
+            }
+        }
+        AppError::Validation(errors)
+    })?;
 
     let report = service::payment_summary(&state.pool, &state.configured_currency, period)
         .await

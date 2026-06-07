@@ -1,12 +1,14 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { RefundStatus, RefundListItem } from '../api/types';
 import { listRefunds } from '../api/client';
 import { formatCurrency } from '../utils/format';
 import StatusFilter from './StatusFilter';
+import RefundDetail from './RefundDetail';
 
 interface RefundListProps {
   currency: string;
   mode?: 'merchant' | 'administrator';
+  initialRefundId?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -14,6 +16,7 @@ const PAGE_SIZE = 20;
 export default function RefundList({
   currency: _currency,
   mode = 'merchant',
+  initialRefundId,
 }: RefundListProps) {
   const [status, setStatus] = useState<RefundStatus | ''>('');
   const [merchantId, setMerchantId] = useState('');
@@ -23,6 +26,7 @@ export default function RefundList({
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const [selectedRefundId, setSelectedRefundId] = useState<string | null>(null);
 
   const isAdmin = mode === 'administrator';
 
@@ -62,6 +66,12 @@ export default function RefundList({
     [status, merchantId, isAdmin]
   );
 
+  useEffect(() => {
+    if (initialRefundId) {
+      setSelectedRefundId(initialRefundId);
+    }
+  }, [initialRefundId]);
+
   const handleSearch = () => {
     setSearched(false);
     load(0, true);
@@ -88,6 +98,15 @@ export default function RefundList({
         return 'failed';
     }
   };
+
+  if (selectedRefundId) {
+    return (
+      <RefundDetail
+        refundId={selectedRefundId}
+        onBack={() => setSelectedRefundId(null)}
+      />
+    );
+  }
 
   return (
     <div>

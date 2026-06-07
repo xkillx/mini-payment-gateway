@@ -1,11 +1,17 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { listReconciliations, getReconciliationReport } from '../../api/client';
 import type { Reconciliation, ReconciliationReport, ReconciliationStatus } from '../../api/types';
 import ReconciliationReportDetail from './ReconciliationReportDetail';
 
 const PAGE_SIZE = 20;
 
-export default function ReconciliationReports() {
+interface ReconciliationReportsProps {
+  initialReconciliationId?: string;
+}
+
+export default function ReconciliationReports({
+  initialReconciliationId,
+}: ReconciliationReportsProps = {}) {
   const [items, setItems] = useState<Reconciliation[]>([]);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -38,6 +44,12 @@ export default function ReconciliationReports() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (initialReconciliationId) {
+      handleSelectReport(initialReconciliationId);
+    }
+  }, [initialReconciliationId]);
 
   const handleLoad = () => {
     setSearched(false);

@@ -28,6 +28,27 @@ const summary: AdminDashboardSummary = {
   audit_overview: {
     recent_attention_audit_records: [],
   },
+  operational_health: {
+    payment_processing_success_rate: {
+      numerator_count: 5,
+      denominator_count: 6,
+      in_flight_count: 1,
+      rate_percent: 83.3,
+    },
+    notification_delivery_success_rate: {
+      numerator_count: 10,
+      denominator_count: 11,
+      in_flight_count: 0,
+      rate_percent: 90.9,
+    },
+    reconciliation_completion_rate: {
+      numerator_count: 3,
+      denominator_count: 3,
+      in_flight_count: 0,
+      rate_percent: 100.0,
+    },
+    recent_failed_operations: [],
+  },
 };
 
 describe('AdminOverview', () => {
