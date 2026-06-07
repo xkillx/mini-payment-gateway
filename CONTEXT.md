@@ -40,6 +40,22 @@ _Avoid_: Transaction history, audit history
 A Payment Overview is a Merchant Dashboard summary of a Merchant Account's Payments by Payment Status and recent Payment activity.
 _Avoid_: Transaction overview, revenue analytics
 
+**Payment Reporting**:
+Payment Reporting is an Administrator-facing aggregate summary of platform-wide Payment and Refund activity across Merchant Accounts over a selected time range.
+_Avoid_: Transaction Reporting, merchant payment overview, reconciliation report, merchant breakdown report
+
+**Payment Reporting Period**:
+A Payment Reporting Period is the UTC time range used for Administrator-facing Payment Reporting, with an inclusive start and exclusive end. Payment creation activity is counted when the Payment was created; outcome metrics are counted when the relevant Payment or Refund lifecycle outcome occurred.
+_Avoid_: Transaction report date range, reconciliation window
+
+**Payment Trend**:
+A Payment Trend is Payment Reporting data grouped into daily buckets for created, successful, and failed Payment activity during a Payment Reporting Period.
+_Avoid_: Revenue trend, refund trend, net settlement trend
+
+**Attempted Payment Amount**:
+An Attempted Payment Amount is the Payment Amount associated with failed Payment activity in Payment Reporting. It is not collected value.
+_Avoid_: Failed revenue, captured amount
+
 **Payment Processing Outcome**:
 A Payment Processing Outcome is the System Principal's result for processing a Payment: successful or failed. A failed outcome may include a failure reason; merchant-supplied Payment Metadata does not decide the outcome.
 _Avoid_: Merchant-selected outcome, metadata-driven outcome
@@ -63,6 +79,10 @@ _Avoid_: Refund state machine (as a replacement for status term)
 **Refund Overview**:
 A Refund Overview is a Merchant Dashboard summary of a Merchant Account's Refunds by Refund Status and recent Refund activity.
 _Avoid_: Reversal overview, refund analytics
+
+**Refund Reporting Activity**:
+Refund Reporting Activity is the Payment Reporting view of completed Refund count and amount, plus failed Refund count as an operational warning, during a Payment Reporting Period.
+_Avoid_: Refund overview, pending refund volume, net settlement adjustment
 
 **Notification Delivery Record**:
 A Notification Delivery Record tracks delivery of one domain event to one destination and its outcome.
@@ -168,6 +188,11 @@ _Avoid_: System user, service account
 
 - "Transaction" was used interchangeably with "Payment" in planning docs; use **Payment** as the canonical term unless referring to external processor records in future scope.
 - New domain artifacts must use **Payment** terminology; "transaction" is treated as legacy wording in planning docs.
+- "Transaction Reporting" in MPG-021 means Administrator-facing **Payment Reporting**, not a new Transaction concept or merchant-scoped Payment Overview.
+- **Payment Reporting** in MPG-021 is aggregate-only across Merchant Accounts; merchant-by-merchant breakdowns are outside MVP scope.
+- A **Payment Reporting Period** uses creation time for Payment creation activity and outcome time for successful Payments, failed Payments, and completed Refunds; its start is inclusive and its end is exclusive.
+- A **Payment Trend** in MPG-021 means daily Payment buckets for created, successful, and failed Payment activity; Refund activity is reported separately.
+- Failed Payment amounts in **Payment Reporting** are **Attempted Payment Amounts**, not collected value.
 - "Search transactions" in Merchant Dashboard planning means searching **Payments** by Payment identifier or Merchant Reference; related Refunds are reached from Payment context rather than through a new combined transaction concept.
 - "Transaction history" in planning docs means **Payment Status History** when discussing a Payment's lifecycle statuses.
 - "Completed payment" in planning docs means a **Payment** with **Payment Status** `successful`; Payment does not have a `completed` status.
@@ -183,6 +208,7 @@ _Avoid_: System user, service account
 - "Refund requested" in planning docs and legacy code means the **Refund** was created; use **refund.created** for the action and Domain Event name.
 - A **Rejected Refund Attempt** is not a **Refund** with **Refund Status** `failed`; `failed` belongs to refund processing after a Refund exists.
 - "Refund outcome" in refund history planning means **Refund Status**; do not introduce a separate Refund Outcome concept for MVP.
+- "Refund activity" in MPG-021 means **Refund Reporting Activity**: completed Refund count and amount, plus failed Refund count; pending and processing Refunds are not main report totals.
 - "Track payment and refund statuses" in Merchant Dashboard planning means showing **Payment Status** and **Refund Status**, not **Notification Delivery Record** status.
 - Creating a **Refund** is a Merchant action; Administrator refund access is for monitoring and inspection, not initiation.
 - "User" appears in planning docs, but **Actor** is the canonical term for an authenticated party. Use **Merchant** or **Administrator** when the role matters.

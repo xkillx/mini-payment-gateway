@@ -401,6 +401,39 @@ export interface RunReconciliationRequest {
   notes?: string;
 }
 
+export interface PaymentSummaryReport {
+  configured_currency: string;
+  generated_at: string;
+  period_start: string;
+  period_end: string;
+  payment_totals: PaymentReportTotals;
+  refund_activity: RefundReportActivity;
+  trend: PaymentTrendBucket[];
+}
+
+export interface PaymentReportTotals {
+  created_count: number;
+  created_amount_minor: number;
+  successful_count: number;
+  successful_amount_minor: number;
+  failed_count: number;
+  failed_attempted_amount_minor: number;
+}
+
+export interface RefundReportActivity {
+  completed_count: number;
+  completed_amount_minor: number;
+  failed_count: number;
+}
+
+export interface PaymentTrendBucket {
+  bucket_date: string;
+  created_count: number;
+  successful_count: number;
+  failed_count: number;
+  successful_amount_minor: number;
+}
+
 export interface ApiError {
   code: string;
   message: string;

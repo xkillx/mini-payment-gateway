@@ -65,7 +65,10 @@ pub fn build(state: AppState) -> Router {
         audit::routes::routes(state.pool.clone()),
         admin_only.clone(),
     );
-    let reporting_routes = role_guard(reporting::routes::routes(), admin_only);
+    let reporting_routes = role_guard(
+        reporting::routes::routes(state.pool.clone(), state.config.payment_currency.clone()),
+        admin_only,
+    );
 
     let v1_router = Router::new()
         .nest("/payments", payments)

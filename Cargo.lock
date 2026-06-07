@@ -1632,12 +1632,10 @@ dependencies = [
  "axum",
  "chrono",
  "serde",
- "serde_json",
- "shared-auth",
  "shared-http",
  "sqlx",
- "thiserror",
- "uuid",
+ "tracing",
+ "validator",
 ]
 
 [[package]]

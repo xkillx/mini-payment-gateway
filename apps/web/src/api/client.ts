@@ -18,6 +18,7 @@ import type {
   RunReconciliationRequest,
   AuditRecordListResponse,
   AuditRecord,
+  PaymentSummaryReport,
   ApiError,
 } from './types';
 
@@ -214,6 +215,22 @@ export async function listAuditRecords(params: {
 
 export async function getAuditRecord(id: string): Promise<AuditRecord> {
   const { data } = await request<AuditRecord>('GET', `/api/v1/audit/${id}`);
+  return data;
+}
+
+export async function getPaymentSummaryReport(params: {
+  from?: string;
+  to?: string;
+}): Promise<PaymentSummaryReport> {
+  const searchParams = new URLSearchParams();
+  if (params.from) searchParams.set('from', params.from);
+  if (params.to) searchParams.set('to', params.to);
+
+  const qs = searchParams.toString();
+  const { data } = await request<PaymentSummaryReport>(
+    'GET',
+    `/api/v1/reporting/payment-summary${qs ? `?${qs}` : ''}`,
+  );
   return data;
 }
 

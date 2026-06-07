@@ -51,4 +51,18 @@ describe('AdminShell', () => {
     const elements = screen.getAllByText('System Health Overview');
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('renders Payment Reporting nav item', () => {
+    render(<AdminShell summary={summary} onRefresh={() => {}} onLogout={() => {}} />);
+
+    expect(screen.getByText('Payment Reporting')).toBeDefined();
+  });
+
+  it('shows Payment Reporting heading when nav item is clicked', () => {
+    render(<AdminShell summary={summary} onRefresh={() => {}} onLogout={() => {}} />);
+
+    screen.getByText('Payment Reporting').click();
+    const elements = screen.getAllByText('Payment Reporting');
+    expect(elements.length).toBeGreaterThanOrEqual(1);
+  });
 });

@@ -6,6 +6,7 @@ import {
   Bell,
   Scale,
   FileText,
+  BarChart3,
   RefreshCw,
   LogOut,
   Menu,
@@ -17,6 +18,7 @@ import RefundList from '../RefundList';
 import NotificationMonitoring from './NotificationMonitoring';
 import ReconciliationReports from './ReconciliationReports';
 import AuditRecords from './AuditRecords';
+import PaymentReporting from './PaymentReporting';
 
 type View =
   | 'overview'
@@ -24,6 +26,7 @@ type View =
   | 'refunds'
   | 'notifications'
   | 'reconciliation'
+  | 'reporting'
   | 'audit';
 
 interface AdminShellProps {
@@ -42,6 +45,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
     { view: 'refunds', label: 'Refunds', icon: <Undo2 size={20} /> },
     { view: 'notifications', label: 'Notifications', icon: <Bell size={20} /> },
     { view: 'reconciliation', label: 'Reconciliation', icon: <Scale size={20} /> },
+    { view: 'reporting', label: 'Payment Reporting', icon: <BarChart3 size={20} /> },
     { view: 'audit', label: 'Audit Records', icon: <FileText size={20} /> },
   ];
 
@@ -52,6 +56,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
       case 'refunds': return 'Refunds';
       case 'notifications': return 'Notifications';
       case 'reconciliation': return 'Reconciliation';
+      case 'reporting': return 'Payment Reporting';
       case 'audit': return 'Audit Records';
     }
   };
@@ -117,6 +122,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
           )}
           {view === 'notifications' && <NotificationMonitoring />}
           {view === 'reconciliation' && <ReconciliationReports />}
+          {view === 'reporting' && <PaymentReporting />}
           {view === 'audit' && <AuditRecords />}
         </div>
       </div>

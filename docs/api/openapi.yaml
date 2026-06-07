@@ -686,16 +686,41 @@ paths:
   /api/v1/reporting/payment-summary:
     get:
       operationId: paymentSummary
-      summary: Get payment summary report (Administrator only)
+      summary: Get Payment Reporting summary (Administrator only)
+      description: |
+        Returns an aggregate, platform-wide Payment Reporting summary of Payment and Refund
+        activity across all Merchant Accounts for a selected UTC Payment Reporting Period.
+        Query period defaults to the last 30 days ending at request time.
       security:
         - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive UTC period start (RFC 3339). Defaults to 30 days before `to` (or request time).
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive UTC period end (RFC 3339). Defaults to request time.
       responses:
+        "200":
+          description: Payment Reporting summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentSummaryReport"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /api/v1/admin/actors:
     get:
@@ -2054,7 +2079,115 @@ components:
         currency:
           type: string
           description: Configured Currency
-        occurred_at:
+         occurred_at:
           type: string
           format: date-time
           description: When the refund.completed Domain Event was recorded
+
+    PaymentSummaryReport:
+      type: object
+      required:
+        - configured_currency
+        - generated_at
+        - period_start
+        - period_end
+        - payment_totals
+        - refund_activity
+        - trend
+      properties:
+        configured_currency:
+          type: string
+          description: Configured Currency (e.g. USD)
+        generated_at:
+          type: string
+          format: date-time
+          description: When this report was generated
+        period_start:
+          type: string
+          format: date-time
+          description: Inclusive UTC Payment Reporting Period start
+        period_end:
+          type: string
+          format: date-time
+          description: Exclusive UTC Payment Reporting Period end
+        payment_totals:
+          $ref: "#/components/schemas/PaymentReportTotals"
+        refund_activity:
+          $ref: "#/components/schemas/RefundReportActivity"
+        trend:
+          type: array
+          description: Daily Payment Trend buckets (zero-filled for every UTC date in the period)
+          items:
+            $ref: "#/components/schemas/PaymentTrendBucket"
+
+    PaymentReportTotals:
+      type: object
+      required:
+        - created_count
+        - created_amount_minor
+        - successful_count
+        - successful_amount_minor
+        - failed_count
+        - failed_attempted_amount_minor
+      properties:
+        created_count:
+          type: integer
+          description: Total Payments created in the period
+        created_amount_minor:
+          type: integer
+          description: Total Payment Amount for created Payments (minor units)
+        successful_count:
+          type: integer
+          description: Total Payments with successful outcome in the period
+        successful_amount_minor:
+          type: integer
+          description: Total Payment Amount for successful Payments (minor units)
+        failed_count:
+          type: integer
+          description: Total Payments with failed outcome in the period
+        failed_attempted_amount_minor:
+          type: integer
+          description: Attempted Payment Amount for failed Payments (minor units, not collected value)
+
+    RefundReportActivity:
+      type: object
+      required:
+        - completed_count
+        - completed_amount_minor
+        - failed_count
+      properties:
+        completed_count:
+          type: integer
+          description: Total completed Refunds in the period
+        completed_amount_minor:
+          type: integer
+          description: Total completed Refund amount (minor units)
+        failed_count:
+          type: integer
+          description: Total failed Refunds in the period (operational warning)
+
+    PaymentTrendBucket:
+      type: object
+      required:
+        - bucket_date
+        - created_count
+        - successful_count
+        - failed_count
+        - successful_amount_minor
+      properties:
+        bucket_date:
+          type: string
+          format: date
+          description: UTC date for this trend bucket
+        created_count:
+          type: integer
+          description: Payments created on this date
+        successful_count:
+          type: integer
+          description: Payments with successful outcome on this date
+        failed_count:
+          type: integer
+          description: Payments with failed outcome on this date
+        successful_amount_minor:
+          type: integer
+          description: Successful Payment Amount on this date (minor units)
