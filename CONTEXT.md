@@ -168,6 +168,22 @@ _Avoid_: Admin dashboard, merchant dashboard, analytics dashboard
 A System Health Overview is the lightweight Administrator Dashboard summary of current operational signals that need attention. It is not a full health or reliability analysis view.
 _Avoid_: Operational Health View, uptime report, SLO dashboard
 
+**Operational Health View**:
+An Operational Health View is the Administrator-only reliability view for current platform health signals, success rates, and recent failed operations across Payments, Refunds, Notification Delivery Records, and Reconciliations over a rolling 24-hour health window. It is a diagnostic and navigation view, not a remediation workspace, and it expands on but does not replace the lightweight System Health Overview.
+_Avoid_: System Health Overview, uptime report, SLO dashboard
+
+**Payment Processing Success Rate**:
+Payment Processing Success Rate is an Operational Health View signal comparing successful Payment outcomes against terminal Payment processing outcomes. Pending or processing Payments are in-flight context, not failures.
+_Avoid_: Payment conversion rate, total payment success rate
+
+**Notification Delivery Success Rate**:
+Notification Delivery Success Rate is an Operational Health View signal comparing delivered Notification Delivery Records against terminal Notification Delivery Record outcomes. Pending or processing Notification Delivery Records are in-flight context, not failures.
+_Avoid_: Webhook uptime, attempt success rate
+
+**Reconciliation Completion Rate**:
+Reconciliation Completion Rate is an Operational Health View signal comparing completed Reconciliations against accepted Reconciliation runs. Matched and mismatched Reconciliations are completed outcomes; error Reconciliations are not completed outcomes.
+_Avoid_: Reconciliation match rate, settlement accuracy rate
+
 **Administrator**:
 An Administrator is an Actor role with platform operations responsibility across merchants.
 _Avoid_: Admin user, superuser
@@ -216,6 +232,12 @@ _Avoid_: System user, service account
 - The **Merchant Dashboard** is only for authenticated Merchants; Administrators use administrator-facing views rather than entering the Merchant workspace.
 - The **Administrator Dashboard** is a separate Administrator-only workspace from the **Merchant Dashboard**, not a role-expanded Merchant Dashboard.
 - A **System Health Overview** in MPG-020 is intentionally lightweight; the fuller Operational Health View belongs to MPG-022.
+- The **Operational Health View** in MPG-022 is a deeper Administrator-only reliability view, not an uptime report, SLO dashboard, or replacement for the lightweight System Health Overview.
+- The **Operational Health View** reports actual current values and failed-operation attention signals; it does not define healthy, degraded, or critical severity thresholds in MVP.
+- The **Operational Health View** excludes authentication and authorization failures in MVP; those remain security/access signals in Audit Records rather than platform processing reliability signals.
+- The **Operational Health View** shows recent failed operations as one newest-first triage feed across failed Payments, failed Refunds, failed Notification Delivery Records, and Reconciliations that are mismatched or error.
+- **Payment Processing Success Rate**, **Notification Delivery Success Rate**, and **Reconciliation Completion Rate** count only terminal outcomes in their denominators; in-flight records are shown as context rather than treated as failures.
+- A success rate with no terminal outcomes in its rolling 24-hour health window is not applicable; it must not be presented as a perfect or failed rate.
 - Authentication failures may involve an **Unknown Principal**, not an **Actor**. Do not call an unauthenticated party an Actor.
 - Authentication failures may include unverified identity claims, but those claims do not establish an **Actor**.
 - Planning docs sometimes call the audited object a "target"; use **Resource** as the canonical term when describing what an Audit Record refers to.
@@ -263,3 +285,7 @@ _Avoid_: System user, service account
 - Domain expert: "No. Send a Notification Delivery Payload so the merchant can identify the Domain Event and then read its event-specific payload."
 - Dev: "Can this Manual Reconciliation use all payments since launch?"
 - Domain expert: "No. It compares one Expected Reconciliation Total with one Actual Reconciliation Total for a specific Reconciliation Window."
+- Dev: "Should authentication failures appear in the Operational Health View?"
+- Domain expert: "No. The Operational Health View is for platform processing reliability; authentication and authorization failures remain in Audit Records."
+- Dev: "No Payments finished in the health window. Is the Payment Processing Success Rate 100%?"
+- Domain expert: "No. With no terminal Payment outcomes, the rate is not applicable."
