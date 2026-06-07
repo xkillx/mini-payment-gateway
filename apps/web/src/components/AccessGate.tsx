@@ -19,8 +19,8 @@ export default function AccessGate({ onTokenSubmit, error }: AccessGateProps) {
   return (
     <div className="page-center">
       <form className="access-gate" onSubmit={handleSubmit}>
-        <h2>MPG Dashboard</h2>
-        <p>Enter your JWT to access the MPG Dashboard.</p>
+        <h2>PayFlow Mini</h2>
+        <p>Enter your JWT to access the appropriate dashboard.</p>
         <input
           type="text"
           value={token}
@@ -28,7 +28,7 @@ export default function AccessGate({ onTokenSubmit, error }: AccessGateProps) {
           placeholder="Paste your JWT here"
         />
         <button className="btn btn-primary" type="submit" disabled={!token.trim()}>
-          Enter dashboard
+          Access dashboard
         </button>
         {error && <div className="error-banner">{error}</div>}
       </form>

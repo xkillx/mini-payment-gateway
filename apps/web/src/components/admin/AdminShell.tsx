@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  LayoutDashboard,
+  Activity,
   CreditCard,
   Undo2,
   Bell,
@@ -37,7 +37,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems: { view: View; label: string; icon: React.ReactNode }[] = [
-    { view: 'overview', label: 'Overview', icon: <LayoutDashboard size={20} /> },
+    { view: 'overview', label: 'System Health', icon: <Activity size={20} /> },
     { view: 'payments', label: 'Payments', icon: <CreditCard size={20} /> },
     { view: 'refunds', label: 'Refunds', icon: <Undo2 size={20} /> },
     { view: 'notifications', label: 'Notifications', icon: <Bell size={20} /> },
@@ -47,11 +47,11 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
 
   const viewLabel = (v: View) => {
     switch (v) {
-      case 'overview': return 'Overview';
+      case 'overview': return 'System Health Overview';
       case 'payments': return 'Payments';
       case 'refunds': return 'Refunds';
       case 'notifications': return 'Notifications';
-      case 'reconciliation': return 'Reconciliation Reports';
+      case 'reconciliation': return 'Reconciliation';
       case 'audit': return 'Audit Records';
     }
   };
@@ -59,7 +59,8 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-brand">MPG Admin</div>
+        <div className="sidebar-brand">Admin Dashboard</div>
+        <div className="sidebar-subtitle">System Administrator</div>
         <nav className="sidebar-nav">
           {navItems.map((item) => (
             <button
@@ -89,6 +90,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
             <button
               className="btn-icon mobile-menu-btn"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle menu"
             >
               <Menu size={20} />
             </button>
@@ -96,7 +98,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
           </div>
           <div className="topbar-right">
             <span className="last-updated">
-              Last updated: {new Date(summary.generated_at).toLocaleTimeString()}
+              Updated: {new Date(summary.generated_at).toLocaleTimeString()}
             </span>
             <button className="btn btn-secondary" onClick={onRefresh}>
               <RefreshCw size={16} />
@@ -106,7 +108,7 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
         </div>
 
         <div className="content">
-          {view === 'overview' && <AdminOverview summary={summary} />}
+          {view === 'overview' && <AdminOverview summary={summary} onRefresh={onRefresh} />}
           {view === 'payments' && (
             <PaymentList currency={summary.configured_currency} mode="administrator" />
           )}
@@ -120,14 +122,14 @@ export default function AdminShell({ summary, onRefresh, onLogout }: AdminShellP
       </div>
 
       <nav className="mobile-nav">
-        {navItems.map((item) => (
+        {navItems.slice(0, 4).map((item) => (
           <button
             key={item.view}
             className={view === item.view ? 'active' : ''}
             onClick={() => setView(item.view)}
           >
             {item.icon}
-            {item.label}
+            <span style={{ fontSize: 9 }}>{item.label}</span>
           </button>
         ))}
       </nav>

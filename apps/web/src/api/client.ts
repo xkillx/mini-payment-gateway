@@ -14,6 +14,8 @@ import type {
   NotificationDeliveryRecordDetail,
   ReconciliationListResponse,
   ReconciliationReport,
+  Reconciliation,
+  RunReconciliationRequest,
   AuditRecordListResponse,
   AuditRecord,
   ApiError,
@@ -178,6 +180,11 @@ export async function listReconciliations(params: {
 
 export async function getReconciliationReport(id: string): Promise<ReconciliationReport> {
   const { data } = await request<ReconciliationReport>('GET', `/api/v1/reconciliation/${id}`);
+  return data;
+}
+
+export async function runReconciliation(req: RunReconciliationRequest): Promise<Reconciliation> {
+  const { data } = await request<Reconciliation>('POST', '/api/v1/reconciliation', req);
   return data;
 }
 

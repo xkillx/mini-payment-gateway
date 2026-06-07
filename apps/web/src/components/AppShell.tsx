@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, CreditCard, Undo2, RefreshCw, LogOut, Menu } from 'lucide-react';
+import { LayoutDashboard, CreditCard, Undo2, RefreshCw, LogOut, Menu, Search } from 'lucide-react';
 import type { DashboardSummary } from '../api/types';
 import DashboardOverview from './DashboardOverview';
 import PaymentList from './PaymentList';
@@ -16,6 +16,8 @@ interface AppShellProps {
 export default function AppShell({ summary, onRefresh, onLogout }: AppShellProps) {
   const [view, setView] = useState<View>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [topSearch, setTopSearch] = useState('');
+  const [paymentListKey, setPaymentListKey] = useState(0);
 
   const navItems: { view: View; label: string; icon: React.ReactNode }[] = [
     { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
@@ -23,10 +25,19 @@ export default function AppShell({ summary, onRefresh, onLogout }: AppShellProps
     { view: 'refunds', label: 'Refunds', icon: <Undo2 size={20} /> },
   ];
 
+  const handleTopSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (topSearch.trim()) {
+      setView('payments');
+      setPaymentListKey((k) => k + 1);
+    }
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-brand">MPG Dashboard</div>
+        <div className="sidebar-brand">PayFlow Mini</div>
+        <div className="sidebar-subtitle">Merchant Portal</div>
         <nav className="sidebar-nav">
           {navItems.map((item) => (
             <button
@@ -53,7 +64,7 @@ export default function AppShell({ summary, onRefresh, onLogout }: AppShellProps
       <div className="main-area">
         <div className="topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn-icon mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            <button className="btn-icon mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu">
               <Menu size={20} />
             </button>
             <h1>
@@ -63,8 +74,22 @@ export default function AppShell({ summary, onRefresh, onLogout }: AppShellProps
             </h1>
           </div>
           <div className="topbar-right">
+            <form onSubmit={handleTopSearch} style={{ display: 'flex', gap: 6 }}>
+              <input
+                className="search-input"
+                type="text"
+                value={topSearch}
+                onChange={(e) => setTopSearch(e.target.value)}
+                placeholder="Search by Payment ID / Merchant Reference"
+                aria-label="Search payments"
+                style={{ minWidth: 220 }}
+              />
+              <button className="btn btn-secondary" type="submit" title="Search payments" aria-label="Search">
+                <Search size={16} />
+              </button>
+            </form>
             <span className="last-updated">
-              Last updated: {new Date(summary.generated_at).toLocaleTimeString()}
+              Updated: {new Date(summary.generated_at).toLocaleTimeString()}
             </span>
             <button className="btn btn-secondary" onClick={onRefresh}>
               <RefreshCw size={16} />
@@ -75,7 +100,14 @@ export default function AppShell({ summary, onRefresh, onLogout }: AppShellProps
 
         <div className="content">
           {view === 'dashboard' && <DashboardOverview summary={summary} onRefresh={onRefresh} />}
-          {view === 'payments' && <PaymentList currency={summary.configured_currency} />}
+          {view === 'payments' && (
+            <PaymentList
+              key={paymentListKey}
+              currency={summary.configured_currency}
+              searchSeed={view === 'payments' && paymentListKey > 0 ? topSearch : undefined}
+              onClearSearchSeed={() => setTopSearch('')}
+            />
+          )}
           {view === 'refunds' && <RefundList currency={summary.configured_currency} />}
         </div>
       </div>

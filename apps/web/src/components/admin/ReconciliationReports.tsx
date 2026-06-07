@@ -71,9 +71,9 @@ export default function ReconciliationReports() {
   const statusClass = (s: ReconciliationStatus) => {
     switch (s) {
       case 'matched':
-        return 'successful';
+        return 'matched';
       case 'mismatched':
-        return 'failed';
+        return 'mismatched';
       case 'error':
         return 'pending';
     }

@@ -92,7 +92,7 @@ export default function NotificationMonitoring() {
       case 'processing':
         return 'processing';
       case 'delivered':
-        return 'successful';
+        return 'delivered';
       case 'failed':
         return 'failed';
       default:

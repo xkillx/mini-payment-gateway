@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PayFlow Mini - Transaction #TRX-94821</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "inverse-primary": "#bdc2ff",
+                      "error": "#ba1a1a",
+                      "tertiary-container": "#422c00",
+                      "on-primary-fixed-variant": "#343d96",
+                      "surface-container-lowest": "#ffffff",
+                      "surface-dim": "#d8dadd",
+                      "secondary": "#006b5f",
+                      "on-primary": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "secondary-fixed-dim": "#70d8c8",
+                      "inverse-surface": "#2d3133",
+                      "on-primary-container": "#8690ee",
+                      "on-primary-fixed": "#000767",
+                      "surface-container-low": "#f2f4f7",
+                      "error-container": "#ffdad6",
+                      "surface": "#f7f9fc",
+                      "surface-container-highest": "#e0e3e6",
+                      "outline": "#767683",
+                      "on-tertiary-fixed-variant": "#604100",
+                      "surface-tint": "#4c56af",
+                      "inverse-on-surface": "#eff1f4",
+                      "tertiary-fixed": "#ffdeac",
+                      "primary-container": "#1a237e",
+                      "primary": "#000666",
+                      "surface-bright": "#f7f9fc",
+                      "outline-variant": "#c6c5d4",
+                      "background": "#f7f9fc",
+                      "surface-container-high": "#e6e8eb",
+                      "on-surface-variant": "#454652",
+                      "surface-variant": "#e0e3e6",
+                      "secondary-container": "#8df5e4",
+                      "on-error": "#ffffff",
+                      "on-tertiary": "#ffffff",
+                      "on-tertiary-container": "#c98c00",
+                      "primary-fixed-dim": "#bdc2ff",
+                      "secondary-fixed": "#8df5e4",
+                      "tertiary-fixed-dim": "#ffba38",
+                      "on-background": "#191c1e",
+                      "on-secondary-container": "#007165",
+                      "on-secondary-fixed-variant": "#005048",
+                      "primary-fixed": "#e0e0ff",
+                      "surface-container": "#eceef1",
+                      "on-tertiary-fixed": "#281900",
+                      "on-surface": "#191c1e",
+                      "on-secondary-fixed": "#00201c",
+                      "on-secondary": "#ffffff",
+                      "tertiary": "#271800"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.8rem",
+                      "xl": "1rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "base": "8px",
+                      "margin-desktop": "40px",
+                      "container-max": "1280px",
+                      "gutter": "24px",
+                      "stack-xs": "4px",
+                      "stack-lg": "48px",
+                      "stack-sm": "12px",
+                      "stack-md": "24px"
+              },
+              "fontFamily": {
+                      "display-lg": ["Plus Jakarta Sans"],
+                      "body-sm": ["Inter"],
+                      "headline-md": ["Plus Jakarta Sans"],
+                      "body-lg": ["Inter"],
+                      "label-md": ["Inter"],
+                      "headline-lg-mobile": ["Plus Jakarta Sans"],
+                      "headline-lg": ["Plus Jakarta Sans"],
+                      "body-md": ["Inter"],
+                      "label-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                      "label-md": ["14px", {"lineHeight": "16px", "letterSpacing": "0.01em", "fontWeight": "600"}],
+                      "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .active-tab-indicator {
+            box-shadow: inset 4px 0 0 0 #000666;
+        }
+        body {
+            background-color: #f7f9fc;
+        }
+    </style>
+</head>
+<body class="font-body-md text-on-surface">
+<!-- TopNavBar -->
+<header class="bg-surface shadow-sm flex justify-between items-center w-full px-margin-desktop h-16 sticky top-0 z-50">
+<div class="flex items-center gap-8">
+<span class="font-headline-md text-headline-md font-bold text-primary">PayFlow Mini</span>
+<div class="hidden md:flex relative items-center">
+<span class="material-symbols-outlined absolute left-3 text-on-surface-variant">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border-none rounded-lg focus:ring-2 focus:ring-primary w-64 text-body-sm" placeholder="Search transactions..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-surface-container transition-colors p-2 rounded-full">notifications</button>
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-surface-container transition-colors p-2 rounded-full">help</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant">
+<img alt="User profile" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAxfO-muTDFWIFQpLRvPF00qCT9eESwrBXTF6ydFRhcmo6c2iFz21zABZQnvhSS5aMCBcH4Z3ZgO9h5NTTwzxsSN0R-ap5_qzOD45i0k2BrcGNSxE2XJVdfc4mZGF_Fg_V-rdAPO_s1axZ_afViEbZHWzDszuJ4zGWpH2SitqssSbzhQ2ry9lFpSx56nO9Jprrgo41PwzMKo-O4jWalzfY0kTbJMDpycHANhdMh3CHIGHUSvn8DV7i383czzFAamARp9xo92w0z_uE"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar (Merchant View) -->
+<nav class="flex flex-col fixed left-0 top-0 h-full w-60 z-40 py-stack-md bg-surface-container hidden md:flex">
+<div class="px-6 mb-8 mt-16">
+<h2 class="font-headline-md text-headline-md font-bold text-primary">Merchant Portal</h2>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Active: PayFlow Pro</p>
+</div>
+<div class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-6 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-6 py-3 text-primary font-bold border-l-4 border-primary bg-surface transition-all" href="#">
+<span class="material-symbols-outlined">payments</span>
+<span class="font-label-md text-label-md">Payments</span>
+</a>
+<a class="flex items-center gap-3 px-6 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">keyboard_return</span>
+<span class="font-label-md text-label-md">Refunds</span>
+</a>
+<a class="flex items-center gap-3 px-6 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">notifications</span>
+<span class="font-label-md text-label-md">Notifications</span>
+</a>
+<a class="flex items-center gap-3 px-6 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</div>
+<div class="px-6 space-y-1 pt-stack-md border-t border-outline-variant/20">
+<a class="flex items-center gap-3 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-label-md text-label-md">Help Center</span>
+</a>
+<a class="flex items-center gap-3 py-3 text-on-surface-variant hover:bg-surface-container-high transition-all" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-label-md text-label-md">Logout</span>
+</a>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="md:ml-60 p-6 md:p-margin-desktop">
+<div class="max-w-container-max mx-auto space-y-stack-md">
+<!-- Breadcrumbs -->
+<nav class="flex items-center gap-2 text-on-surface-variant mb-6">
+<a class="hover:text-primary transition-colors font-label-sm text-label-sm" href="#">Payments</a>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+<span class="text-on-surface font-label-md text-label-md">#TRX-94821</span>
+</nav>
+<!-- Detail Header -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="space-y-1">
+<div class="flex items-center gap-3">
+<h1 class="font-headline-lg text-headline-lg text-primary">#TRX-94821</h1>
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container font-label-sm text-label-sm rounded-full flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                            Successful
+                        </span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Merchant ID: M-88219 • Storefront: Main Web Terminal</p>
+</div>
+<div class="text-right">
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Amount</p>
+<p class="font-display-lg text-display-lg text-primary">$125.00</p>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
+<!-- Left Column: Info & Timeline (Bento Grid Style) -->
+<div class="lg:col-span-8 space-y-gutter">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+<!-- Transaction Info -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
+<h3 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-6">Transaction Info</h3>
+<div class="space-y-4">
+<div class="flex justify-between items-start">
+<span class="text-on-surface-variant text-body-sm">Method</span>
+<div class="text-right">
+<p class="font-label-md text-label-md text-on-surface flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-[18px]">credit_card</span> Visa ****4242
+                                        </p>
+<p class="text-body-sm text-on-surface-variant">Expires 09/26</p>
+</div>
+</div>
+<div class="flex justify-between">
+<span class="text-on-surface-variant text-body-sm">Date</span>
+<span class="text-on-surface text-label-md font-label-md">Oct 24, 2023, 14:32:05</span>
+</div>
+<div class="flex justify-between">
+<span class="text-on-surface-variant text-body-sm">Customer Email</span>
+<span class="text-on-surface text-label-md font-label-md">alex.walker@gmail.com</span>
+</div>
+</div>
+</div>
+<!-- Payment Timeline -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10">
+<h3 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-6">Payment Timeline</h3>
+<div class="relative space-y-6">
+<!-- Line -->
+<div class="absolute left-[11px] top-2 bottom-2 w-0.5 bg-secondary"></div>
+<div class="relative flex gap-4">
+<div class="w-6 h-6 rounded-full bg-secondary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-white text-[14px]">check</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Payment Created</p>
+<p class="text-body-sm text-on-surface-variant">Oct 24, 14:31:58</p>
+</div>
+</div>
+<div class="relative flex gap-4">
+<div class="w-6 h-6 rounded-full bg-secondary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-white text-[14px]">check</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Processing</p>
+<p class="text-body-sm text-on-surface-variant">Oct 24, 14:32:01</p>
+</div>
+</div>
+<div class="relative flex gap-4">
+<div class="w-6 h-6 rounded-full bg-secondary flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-white text-[14px]">check</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Success</p>
+<p class="text-body-sm text-on-surface-variant">Oct 24, 14:32:05</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Related Events Log -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/10 overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant/10 flex justify-between items-center">
+<h3 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Notification Log</h3>
+<button class="text-primary font-label-sm text-label-sm hover:underline">View All</button>
+</div>
+<div class="divide-y divide-outline-variant/10">
+<div class="p-4 flex gap-4 hover:bg-surface transition-colors cursor-default">
+<span class="material-symbols-outlined text-on-surface-variant mt-0.5">mail</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Receipt Email Sent</p>
+<p class="text-body-sm text-on-surface-variant">Successfully delivered to alex.walker@gmail.com</p>
+<p class="text-[10px] text-outline mt-1 uppercase">14:32:10</p>
+</div>
+</div>
+<div class="p-4 flex gap-4 hover:bg-surface transition-colors cursor-default">
+<span class="material-symbols-outlined text-on-surface-variant mt-0.5">webhook</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Webhook Triggered</p>
+<p class="text-body-sm text-on-surface-variant">Endpoint: https://api.merchant-shop.com/v1/payments/webhook</p>
+<p class="text-[10px] text-outline mt-1 uppercase">14:32:06</p>
+</div>
+</div>
+<div class="p-4 flex gap-4 hover:bg-surface transition-colors cursor-default">
+<span class="material-symbols-outlined text-on-surface-variant mt-0.5">inventory_2</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Order Fulfillment Initiated</p>
+<p class="text-body-sm text-on-surface-variant">Internal order ID #ORD-12003 created</p>
+<p class="text-[10px] text-outline mt-1 uppercase">14:32:05</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Refund Action -->
+<div class="lg:col-span-4">
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/10 sticky top-24">
+<h3 class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest mb-6">Process Refund</h3>
+<div class="space-y-6">
+<div class="p-4 bg-tertiary-fixed-dim/20 border-l-4 border-tertiary-fixed-dim rounded-r-lg">
+<div class="flex gap-2">
+<span class="material-symbols-outlined text-on-tertiary-container text-[20px]">info</span>
+<p class="text-body-sm text-on-tertiary-container leading-relaxed">
+                                        Refunds are processed immediately. Note that it may take 5-10 business days for the funds to appear on the customer's statement.
+                                    </p>
+</div>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-2" for="refund-amount">Refund Amount</label>
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">$</span>
+<input class="w-full pl-8 pr-4 py-3 bg-surface border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary focus:border-primary text-headline-md font-bold text-on-surface outline-none" id="refund-amount" max="125.00" step="0.01" type="number" value="125.00"/>
+</div>
+<div class="mt-3 flex items-center gap-2">
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">priority_high</span>
+<p class="text-label-sm text-on-surface-variant">Refund cannot exceed original amount ($125.00)</p>
+</div>
+</div>
+<div class="space-y-2">
+<label class="block font-label-md text-label-md text-on-surface">Reason for Refund</label>
+<select class="w-full px-4 py-2 bg-surface border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary outline-none text-body-md">
+<option>Customer requested</option>
+<option>Duplicate charge</option>
+<option>Fraudulent</option>
+<option>Other</option>
+</select>
+</div>
+<button class="w-full py-4 bg-primary text-white rounded-lg font-label-md text-label-md hover:bg-on-primary-fixed-variant transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary/20" id="refund-btn">
+<span class="material-symbols-outlined">undo</span>
+                                Process Refund
+                            </button>
+<p class="text-center text-label-sm text-outline px-4">
+                                By clicking Process Refund, you authorize the reversal of these funds.
+                            </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Success Modal (Hidden by default) -->
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-on-background/40 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300" id="success-modal">
+<div class="bg-surface-container-lowest p-8 rounded-2xl shadow-xl max-w-md w-full mx-4 transform scale-95 transition-transform duration-300">
+<div class="flex flex-col items-center text-center space-y-4">
+<div class="w-16 h-16 bg-secondary-container rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined text-on-secondary-container text-[40px]" data-weight="fill">check_circle</span>
+</div>
+<h2 class="font-headline-lg text-headline-lg text-primary">Refund Successful</h2>
+<p class="text-body-md text-on-surface-variant">
+                    The amount of <span class="font-bold text-on-surface">$125.00</span> has been issued back to the original payment method.
+                </p>
+<button class="w-full mt-6 py-3 bg-primary text-white rounded-lg font-label-md" onclick="closeModal()">Return to Details</button>
+</div>
+</div>
+</div>
+<script>
+        const refundBtn = document.getElementById('refund-btn');
+        const modal = document.getElementById('success-modal');
+        const modalContent = modal.querySelector('div');
+
+        refundBtn.addEventListener('click', () => {
+            // Simple micro-interaction
+            refundBtn.innerHTML = '<span class="material-symbols-outlined animate-spin">sync</span> Processing...';
+            refundBtn.classList.add('opacity-80');
+            
+            setTimeout(() => {
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                modalContent.classList.remove('scale-95');
+                modalContent.classList.add('scale-100');
+            }, 1000);
+        });
+
+        function closeModal() {
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modalContent.classList.add('scale-95');
+            refundBtn.innerHTML = '<span class="material-symbols-outlined">undo</span> Process Refund';
+            refundBtn.classList.remove('opacity-80');
+        }
+
+        // Validation logic
+        const refundInput = document.getElementById('refund-amount');
+        refundInput.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (val > 125.00) {
+                e.target.classList.add('border-error', 'text-error');
+                refundBtn.disabled = true;
+                refundBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                e.target.classList.remove('border-error', 'text-error');
+                refundBtn.disabled = false;
+                refundBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        });
+    </script>
+</body></html>

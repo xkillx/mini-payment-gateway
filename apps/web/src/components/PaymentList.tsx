@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { PaymentStatus } from '../api/types';
 import PaymentSearch from './PaymentSearch';
 import PaymentDetail from './PaymentDetail';
@@ -10,6 +10,8 @@ interface PaymentListProps {
   currency: string;
   mode?: 'merchant' | 'administrator';
   showMerchantFilter?: boolean;
+  searchSeed?: string;
+  onClearSearchSeed?: () => void;
 }
 
 const PAGE_SIZE = 20;
@@ -18,6 +20,8 @@ export default function PaymentList({
   currency: _currency,
   mode = 'merchant',
   showMerchantFilter = false,
+  searchSeed,
+  onClearSearchSeed,
 }: PaymentListProps) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<PaymentStatus | ''>('');
@@ -29,6 +33,7 @@ export default function PaymentList({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const hasAutoSearched = useRef(false);
 
   const isAdmin = mode === 'administrator';
 
@@ -69,6 +74,22 @@ export default function PaymentList({
     },
     [search, status, merchantId, isAdmin]
   );
+
+  useEffect(() => {
+    if (searchSeed && !hasAutoSearched.current) {
+      setSearch(searchSeed);
+      hasAutoSearched.current = true;
+      if (onClearSearchSeed) {
+        setTimeout(() => onClearSearchSeed(), 0);
+      }
+    }
+  }, [searchSeed, onClearSearchSeed]);
+
+  useEffect(() => {
+    if (searchSeed && hasAutoSearched.current && !searched) {
+      load(0, true);
+    }
+  }, [search, searched, status, load, searchSeed]);
 
   const handleSearch = () => {
     setSearched(false);

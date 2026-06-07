@@ -393,6 +393,14 @@ export interface RefundResponse {
   updated_at: string;
 }
 
+export interface RunReconciliationRequest {
+  currency: string;
+  window_start: string;
+  window_end: string;
+  actual_total_minor: number;
+  notes?: string;
+}
+
 export interface ApiError {
   code: string;
   message: string;
