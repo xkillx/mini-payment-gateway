@@ -137,7 +137,7 @@ async fn main() -> Result<(), anyhow::Error> {
             check_migrations(&pool).await?;
         }
         "seed" => {
-            shared_db::seed::seed_actors(&pool).await;
+            shared_db::seed::seed_all(&pool).await;
         }
         other => {
             anyhow::bail!("Unknown command: {other}. Use 'up', 'check', or 'seed'.");
